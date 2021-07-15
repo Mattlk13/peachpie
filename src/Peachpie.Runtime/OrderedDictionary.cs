@@ -95,25 +95,39 @@ namespace Pchp.Core
 
         public static implicit operator IntStringKey(int value) => new IntStringKey(value);
 
-        public static implicit operator IntStringKey(string value) => value != null ? Convert.StringToArrayKey(value) : EmptyStringKey;
+        public static implicit operator IntStringKey(long value) => new IntStringKey(value);
 
-        public static implicit operator IntStringKey(PhpString value) => new IntStringKey(value.ToString());
+        public static implicit operator IntStringKey(string value) => FromString(value);
+
+        public static implicit operator IntStringKey(PhpString value) => FromString(value.ToString());
 
         public static implicit operator IntStringKey(PhpValue value) => Convert.ToIntStringKey(value);
 
-        public static implicit operator IntStringKey(PhpNumber value) => new IntStringKey((int)value.ToLong());
+        public static implicit operator IntStringKey(PhpNumber value) => new IntStringKey(value.ToLong());
 
         public static bool operator ==(IntStringKey a, long b) => a.Integer == b && a.IsInteger;
 
         public static bool operator !=(IntStringKey a, long b) => a.IsString || a.Integer != b;
 
+        /// <summary>
+        /// Creates the <see cref="IntStringKey"/> from a string representation.
+        /// Checks for numeric value, and creates either string key or int key.
+        /// </summary>
+        /// <param name="value">A string or <c>null</c>.</param>
+        /// <returns>Properly created key.</returns>
+        public static IntStringKey FromString(string value) => value != null ? Convert.StringToArrayKey(value) : EmptyStringKey;
+
         internal static IntStringKey FromObject(object key)
         {
-            if (key is string str) return new IntStringKey(str);
-            if (key is long l) return new IntStringKey(l);
-            if (key is int i) return new IntStringKey(i);
-
-            throw new ArgumentException();
+            return key switch
+            {
+                string str => str,
+                long l => l,
+                int i => i,
+                PhpString phps => phps,
+                PhpNumber n => n,
+                _ => throw new ArgumentException(null, nameof(key)),
+            };
         }
 
         public bool IsString => !IsInteger;
@@ -139,7 +153,7 @@ namespace Pchp.Core
 
         public bool Equals(string skey) => _skey == skey && IsString;
 
-        public override string ToString() => _skey ?? _ikey.ToString();
+        public override string ToString() => _skey ?? _ikey.ToString(Context.InvariantNumberFormatInfo);
 
         public int CompareTo(IntStringKey other)
         {
@@ -148,12 +162,12 @@ namespace Pchp.Core
                 if (other.IsInteger)
                     return _ikey.CompareTo(other._ikey);
                 else
-                    return string.CompareOrdinal(_ikey.ToString(), other._skey);
+                    return string.CompareOrdinal(Convert.ToString(_ikey), other._skey);
             }
             else
             {
                 if (other.IsInteger)
-                    return string.CompareOrdinal(_skey, other._ikey.ToString());
+                    return string.CompareOrdinal(_skey, Convert.ToString(other._ikey));
                 else
                     return string.CompareOrdinal(_skey, other._skey);
             }

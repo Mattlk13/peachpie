@@ -693,12 +693,16 @@ namespace Pchp.CodeAnalysis.Semantics
         protected BoundExpression BindConcatEx(AST.Expression[] args)
         {
             // Flatten and bind concat arguments using a stack (its bottom is the last argument)
-            var boundArgs = new List<BoundArgument>();
-            var exprStack = new Stack<AST.Expression>();
+            var boundArgs = new List<BoundArgument>(args.Length);
+            var exprStack = new Stack<AST.Expression>(args.Length);
 
-            args.Reverse().ForEach(exprStack.Push);
+            // args.Reverse().ForEach(exprStack.Push);
+            for (int i = args.Length - 1; i >= 0; i--)
+            {
+                exprStack.Push(args[i]);
+            }
 
-            while (exprStack.Count > 0)
+            while (exprStack.Count != 0)
             {
                 var arg = exprStack.Pop();
                 if (arg is AST.ConcatEx concat)
@@ -987,13 +991,32 @@ namespace Pchp.CodeAnalysis.Semantics
         {
             Debug.Assert(access.IsRead || access.IsReadRef || access.IsNone);
 
+            if (access.IsReadRef)
+            {
+                // assigning `new` by reference is deprecated,
+                // this is not intended to create an alias
+                access = BoundAccess.Read;
+            }
+
             return new BoundNewEx(BindTypeRef(x.ClassNameRef, objectTypeInfoSemantic: true), BindArguments(x.CallSignature.Parameters))
                 .WithAccess(access);
         }
 
         protected BoundExpression BindArrayEx(AST.ArrayEx x, BoundAccess access)
         {
-            if (x.Operation == AST.Operations.Array)
+            // determine the array is a part of list() construct:
+            var aslist = false;
+            for (AST.Expression parent = x; parent is AST.ArrayEx; parent = parent.ContainingElement as AST.Expression)
+            {
+                aslist |= parent.Operation == AST.Operations.List;
+            }
+
+            if (aslist)
+            {
+                Debug.Assert(access.IsWrite);
+                return new BoundListEx(BindListItems(x.Items)).WithAccess(BoundAccess.Write);
+            }
+            else if (x.Operation == AST.Operations.Array)
             {
                 Debug.Assert(access.IsRead || access.IsNone);
 
@@ -1003,15 +1026,7 @@ namespace Pchp.CodeAnalysis.Semantics
                     // _diagnostics. ...
                 }
 
-                return new BoundArrayEx(BindArrayItems(x.Items))
-                    .WithAccess(access);
-            }
-            else if (x.Operation == AST.Operations.List)
-            {
-                Debug.Assert(access.IsWrite);
-
-                return new BoundListEx(BindArrayItems(x.Items, islist: true))
-                    .WithAccess(BoundAccess.Write);
+                return new BoundArrayEx(BindArrayItems(x.Items)).WithAccess(access);
             }
             else
             {
@@ -1019,7 +1034,49 @@ namespace Pchp.CodeAnalysis.Semantics
             }
         }
 
-        protected ImmutableArray<KeyValuePair<BoundExpression, BoundExpression>> BindArrayItems(AST.Item[] items, bool islist = false)
+        protected ImmutableArray<KeyValuePair<BoundExpression, BoundReferenceExpression>> BindListItems(AST.Item[] items)
+        {
+            if (items.Length == 0)
+            {
+                return ImmutableArray<KeyValuePair<BoundExpression, BoundReferenceExpression>>.Empty;
+            }
+
+            var builder = ImmutableArray.CreateBuilder<KeyValuePair<BoundExpression, BoundReferenceExpression>>(items.Length);
+
+            foreach (var x in items)
+            {
+                if (x == null)
+                {
+                    // list() may contain empty items
+                    builder.Add(default);
+                    continue;
+                }
+
+                if (x is AST.SpreadItem)
+                {
+                    Diagnostics.Add(
+                        ContainingFile.GetLocation(x.Value.Span.ToTextSpan()),
+                        Errors.ErrorCode.ERR_NotYetImplemented,
+                        "'...' spread array operator");
+                    continue;
+                }
+
+                Debug.Assert(x is AST.RefItem || x is AST.ValueItem);
+
+                var boundIndex = x.Index != null ? BindExpression(x.Index, BoundAccess.Read) : null;
+                var value = (AST.Expression)((AST.IArrayItem)x).Value;
+
+                // write access
+                var boundValue = (BoundReferenceExpression)BindExpression(value, x.IsByRef ? BoundAccess.Write.WithWriteRef(0) : BoundAccess.Write);
+
+                builder.Add(new KeyValuePair<BoundExpression, BoundReferenceExpression>(boundIndex, boundValue));
+            }
+
+            //
+            return builder.MoveToImmutable();
+        }
+
+        protected ImmutableArray<KeyValuePair<BoundExpression, BoundExpression>> BindArrayItems(AST.Item[] items)
         {
             // trim trailing empty items
             int count = items.Length;
@@ -1040,42 +1097,32 @@ namespace Pchp.CodeAnalysis.Semantics
                 var x = items[i];
                 if (x == null)
                 {
-                    // list() may contain empty items
-                    Debug.Assert(islist);
-                    builder.Add(default);
+                    throw ExceptionUtilities.Unreachable;
                 }
-                else
+
+                if (x is AST.SpreadItem)
                 {
-                    if (x is AST.SpreadItem)
-                    {
-                        throw new NotImplementedException("'...' spread array operator");
-                    }
-
-                    Debug.Assert(x is AST.RefItem || x is AST.ValueItem);
-
-                    var boundIndex = (x.Index != null) ? BindExpression(x.Index, BoundAccess.Read) : null;
-                    BoundExpression boundValue;
-
-                    var value = (AST.Expression)((AST.IArrayItem)x).Value;
-
-                    if (islist)
-                    {
-                        // write access
-                        boundValue = BindExpression(value, x.IsByRef ? BoundAccess.Write.WithWriteRef(0) : BoundAccess.Write);
-                    }
-                    else
-                    {
-                        // read access
-                        boundValue = BindExpression(value, x.IsByRef ? BoundAccess.ReadRef : BoundAccess.Read);
-
-                        if (!x.IsByRef)
-                        {
-                            boundValue = BindCopyValue(boundValue);
-                        }
-                    }
-
-                    builder.Add(new KeyValuePair<BoundExpression, BoundExpression>(boundIndex, boundValue));
+                    Diagnostics.Add(
+                        ContainingFile.GetLocation(x.Value.Span.ToTextSpan()),
+                        Errors.ErrorCode.ERR_NotYetImplemented,
+                        "'...' spread array operator");
+                    continue;
                 }
+
+                Debug.Assert(x is AST.RefItem || x is AST.ValueItem);
+
+                var boundIndex = (x.Index != null) ? BindExpression(x.Index, BoundAccess.Read) : null;
+                var value = (AST.Expression)((AST.IArrayItem)x).Value;
+
+                // read access
+                var boundValue = BindExpression(value, x.IsByRef ? BoundAccess.ReadRef : BoundAccess.Read);
+
+                if (!x.IsByRef)
+                {
+                    boundValue = BindCopyValue(boundValue);
+                }
+
+                builder.Add(new KeyValuePair<BoundExpression, BoundExpression>(boundIndex, boundValue));
             }
 
             //
@@ -1294,7 +1341,7 @@ namespace Pchp.CodeAnalysis.Semantics
                         goto case AST.Operations.BinaryCast;
                     }
 
-                    return new BoundConversionEx(boundOperation, BoundTypeRefFactory.StringTypeRef); // TODO // CONSIDER: should be WritableString and analysis should rewrite it to String if possible
+                    return new BoundConversionEx(boundOperation, BoundTypeRefFactory.WritableStringRef);
 
                 case AST.Operations.BinaryCast:
                     // (PhpString)(byte[])expression
@@ -1318,13 +1365,38 @@ namespace Pchp.CodeAnalysis.Semantics
 
         protected BoundExpression BindAssignEx(AST.AssignEx expr, BoundAccess access)
         {
-            var target = (BoundReferenceExpression)BindExpression(expr.LValue, BoundAccess.Write);
+            AST.Expression rvalue;
+
+            if (expr is AST.ValueAssignEx assign)
+            {
+                Debug.Assert(expr.Operation != AST.Operations.AssignRef);
+                rvalue = assign.RValue;
+            }
+            else if (expr is AST.RefAssignEx refassign)
+            {
+                Debug.Assert(expr.Operation == AST.Operations.AssignRef);
+                rvalue = refassign.RValue;
+            }
+            else
+            {
+                throw ExceptionUtilities.UnexpectedValue(expr);
+            }
+
+            BoundReferenceExpression target;
             BoundExpression value;
 
-            // bind value (read as value or as ref)
-            if (expr is AST.ValueAssignEx assignEx)
+            // bind target & value (read as value or as ref)
+            if (expr.Operation == AST.Operations.AssignRef && !(rvalue is AST.NewEx))
             {
-                value = BindExpression(assignEx.RValue, BoundAccess.Read);
+                // ref assignment
+                target = (BoundReferenceExpression)BindExpression(expr.LValue, BoundAccess.Write.WithWriteRef(0));  // note: analysis will write the write type
+                value = BindExpression(rvalue, BoundAccess.ReadRef);
+            }
+            else
+            {
+                // value assignment
+                target = (BoundReferenceExpression)BindExpression(expr.LValue, BoundAccess.Write);
+                value = BindExpression(rvalue, BoundAccess.Read);
 
                 // we don't need copy of RValue if assigning to list() or in a part of compound operation
                 if (expr.Operation == AST.Operations.AssignValue && !(target is BoundListEx))
@@ -1332,49 +1404,36 @@ namespace Pchp.CodeAnalysis.Semantics
                     value = BindCopyValue(value);
                 }
             }
-            else if (expr is AST.RefAssignEx refAssignEx)
-            {
-                Debug.Assert(expr.Operation == AST.Operations.AssignRef);
-                target.Access = target.Access.WithWriteRef(0); // note: analysis will write the write type
-                value = BindExpression(refAssignEx.RValue, BoundAccess.ReadRef);
-            }
-            else
-            {
-                ExceptionUtilities.UnexpectedValue(expr);
-                return null;
-            }
 
             //
-            if (expr.Operation == AST.Operations.AssignValue || expr.Operation == AST.Operations.AssignRef)
+            if (expr.Operation == AST.Operations.AssignValue ||
+                expr.Operation == AST.Operations.AssignRef)
             {
                 return new BoundAssignEx(target, value).WithAccess(access);
             }
+
+            if (target is BoundArrayItemEx itemex && itemex.Index == null)
+            {
+                // Special case:
+                switch (expr.Operation)
+                {
+                    // "ARRAY[] .= VALUE" => "ARRAY[] = (string)VALUE"
+                    case AST.Operations.AssignPrepend:
+                    case AST.Operations.AssignAppend:   // .=
+                        value = BindConcatEx(new List<BoundArgument>() { BoundArgument.Create(new BoundLiteral(null).WithAccess(BoundAccess.Read)), BoundArgument.Create(value) });
+                        break;
+
+                    default:
+                        value = new BoundBinaryEx(new BoundLiteral(null).WithAccess(BoundAccess.Read), value, AstUtils.CompoundOpToBinaryOp(expr.Operation));
+                        break;
+                }
+
+                return new BoundAssignEx(target, value.WithAccess(BoundAccess.Read)).WithAccess(access);
+            }
             else
             {
-                if (target is BoundArrayItemEx itemex && itemex.Index == null)
-                {
-                    // Special case:
-                    switch (expr.Operation)
-                    {
-                        // "ARRAY[] .= VALUE" => "ARRAY[] = (string)VALUE"
-                        case AST.Operations.AssignPrepend:
-                        case AST.Operations.AssignAppend:   // .=
-                            value = BindConcatEx(new List<BoundArgument>() { BoundArgument.Create(new BoundLiteral(null).WithAccess(BoundAccess.Read)), BoundArgument.Create(value) });
-                            break;
-
-                        default:
-                            value = new BoundBinaryEx(new BoundLiteral(null).WithAccess(BoundAccess.Read), value, AstUtils.CompoundOpToBinaryOp(expr.Operation));
-                            break;
-                    }
-
-                    return new BoundAssignEx(target, value.WithAccess(BoundAccess.Read)).WithAccess(access);
-                }
-                else
-                {
-                    target.Access = target.Access.WithRead();   // Read & Write on target
-
-                    return new BoundCompoundAssignEx(target, value, expr.Operation).WithAccess(access);
-                }
+                target.Access = target.Access.WithRead();   // Read & Write on target
+                return new BoundCompoundAssignEx(target, value, expr.Operation).WithAccess(access);
             }
         }
 
@@ -1385,14 +1444,33 @@ namespace Pchp.CodeAnalysis.Semantics
 
         protected static BoundExpression BindLiteral(AST.Literal expr)
         {
-            if (expr is AST.LongIntLiteral longIntLit) return new BoundLiteral(longIntLit.Value);
-            if (expr is AST.StringLiteral stringLit) return new BoundLiteral(stringLit.Value);
+            if (expr is AST.LongIntLiteral longIntLit) return new BoundLiteral(longIntLit.Value.AsObject());
+            if (expr is AST.StringLiteral stringLit) return BindStringLiteral(stringLit);
             if (expr is AST.DoubleLiteral doubleLit) return new BoundLiteral(doubleLit.Value);
             if (expr is AST.BoolLiteral boolLit) return new BoundLiteral(boolLit.Value.AsObject());
-            if (expr is AST.NullLiteral nullLit) return new BoundLiteral(null);
+            if (expr is AST.NullLiteral) return new BoundLiteral(null);
             if (expr is AST.BinaryStringLiteral binStringLit) return new BoundLiteral(binStringLit.Value);
 
             throw new NotImplementedException();
+        }
+
+        static BoundExpression BindStringLiteral(AST.StringLiteral str)
+        {
+            if (str is AST.IStringLiteralValue chunks && chunks.Contains8bitText)
+            {
+                var args = new List<BoundArgument>();
+
+                foreach (var value in chunks.EnumerateChunks())
+                {
+                    Debug.Assert(value is string || value is byte[]);
+                    var expr = new BoundLiteral(value).WithAccess(BoundAccess.Read);
+                    args.Add(BoundArgument.Create(expr));
+                }
+
+                return new BoundConcatEx(args.AsImmutable());
+            }
+
+            return new BoundLiteral(str.Value);
         }
 
         /// <summary>

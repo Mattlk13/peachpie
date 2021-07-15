@@ -691,6 +691,15 @@ namespace Pchp.Library.Resources {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to The flag {0} is invalid or not supported on this platform.
+        /// </summary>
+        public static string glob_invalid_flags {
+            get {
+                return ResourceManager.GetString("glob_invalid_flags", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Header &apos;{0}&apos; not supported and has been ignored.
         /// </summary>
         public static string header_not_supported {
@@ -1465,7 +1474,7 @@ namespace Pchp.Library.Resources {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to The segment length must be greater then zero.
+        ///   Looks up a localized string similar to The length of each segment must be greater than zero.
         /// </summary>
         public static string segment_length_not_positive {
             get {
@@ -1497,6 +1506,15 @@ namespace Pchp.Library.Resources {
         public static string serialization_json_inf_nan_error {
             get {
                 return ResourceManager.GetString("serialization_json_inf_nan_error", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Malformed UTF-8 characters, possibly incorrectly encoded.
+        /// </summary>
+        public static string serialization_json_utf8_error {
+            get {
+                return ResourceManager.GetString("serialization_json_utf8_error", resourceCulture);
             }
         }
         
@@ -1573,7 +1591,16 @@ namespace Pchp.Library.Resources {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Error connecting &apos;{0}&apos;: {0}.
+        ///   Looks up a localized string similar to A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond..
+        /// </summary>
+        public static string socket_accept_timeout {
+            get {
+                return ResourceManager.GetString("socket_accept_timeout", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Error connecting &apos;{0}&apos;: {1}.
         /// </summary>
         public static string socket_open_error {
             get {

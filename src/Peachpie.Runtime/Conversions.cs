@@ -77,17 +77,17 @@ namespace Pchp.Core
         /// <summary>
         /// Gets string representation of an integer value.
         /// </summary>
-        public static string ToString(long value) => value.ToString();
+        public static string ToString(long value) => value.ToString(Context.InvariantNumberFormatInfo);
 
         /// <summary>
         /// Gets string representation of an integer value.
         /// </summary>
-        public static string ToString(int value) => value.ToString();
+        public static string ToString(int value) => value.ToString(Context.InvariantNumberFormatInfo);
 
         /// <summary>
         /// Gets string representation of a floating point number value.
         /// </summary>
-        public static string ToString(double value) => value.ToString("G", Context.InvariantNumberFormatInfo);
+        public static string ToString(double value) => value.ToString(Context.InvariantNumberFormatInfo); // format "G" by default
 
         public static string ToString(IPhpConvertible value) => value.ToString();
 
@@ -110,6 +110,11 @@ namespace Pchp.Core
         /// Converts mutable string to string.
         /// </summary>
         public static string ToString(PhpString value, Context ctx) => value.ToString(ctx);
+
+        /// <summary>
+        /// Gets value as a string.
+        /// </summary>
+        public static string ToString(byte[] value, Context ctx) => ctx.StringEncoding.GetString(value);
 
         /// <summary>
         /// Converts mutable string to byte[].
@@ -455,6 +460,11 @@ namespace Pchp.Core
             {
                 return convertible.ToNumber(out number);
             }
+            else if (obj is decimal d)
+            {
+                number = PhpNumber.Create((double)d);
+                return NumberInfo.IsNumber | NumberInfo.Double;
+            }
             else
             {
                 PhpException.Throw(PhpError.Notice, string.Format(Resources.ErrResources.object_could_not_be_converted, obj.GetPhpTypeInfo().Name, PhpVariable.TypeNameInt));
@@ -478,8 +488,7 @@ namespace Pchp.Core
         /// </summary>
         public static PhpNumber ToNumber(PhpValue value)
         {
-            PhpNumber n;
-            if ((value.ToNumber(out n) & NumberInfo.IsNumber) == 0)
+            if ((value.ToNumber(out var n) & NumberInfo.IsNumber) == 0)
             {
                 // TODO: Err
             }
@@ -658,6 +667,11 @@ namespace Pchp.Core
             /// The original object was PHP array. This has an effect on most PHP arithmetic operators.
             /// </summary>
             IsPhpArray = 256,
+
+            /// <summary>
+            /// The original value was a string.
+            /// </summary>
+            IsString = 512,
         }
 
         /// <summary>
@@ -719,11 +733,11 @@ namespace Pchp.Core
                 l = d = 0;
                 longValue = 0;
                 doubleValue = 0.0;
-                return NumberInfo.LongInteger;
+                return NumberInfo.LongInteger | NumberInfo.IsString;
             }
 
             // invariant after return: 0 <= i <= l <= d <= p <= old(p) + length - 1.
-            NumberInfo result = 0;
+            var result = NumberInfo.IsString;
 
             Debug.Assert(from >= 0);
             //if (from < 0) from = 0;
@@ -1432,12 +1446,33 @@ namespace Pchp.Core
         {
             PhpTypeCode.Null => null, // TODO: support nullable conversion, target parameter can be either `string` or `string?`
             PhpTypeCode.Boolean => Convert.ToString(value.Boolean),
-            PhpTypeCode.Long => value.Long.ToString(),
+            PhpTypeCode.Long => Convert.ToString(value.Long),
             PhpTypeCode.Double => Convert.ToString(value.Double),
             PhpTypeCode.String => value.String,
             PhpTypeCode.MutableString => value.MutableStringBlob.ToString(ctx.StringEncoding),
             PhpTypeCode.Object => Convert.ToString(value.Object),
             PhpTypeCode.Alias => ToString(value.Alias.Value, ctx),
+            _ => throw PhpException.TypeErrorException(),
+        };
+
+        /// <summary>
+        /// Gets value as a string.
+        /// </summary>
+        public static string ToString(byte[] value, Context ctx) => ctx.StringEncoding.GetString(value);
+
+        /// <summary>
+        /// Gets the underlying PHP string if present, a new PHP string representing the value otherwise.
+        /// </summary>
+        public static PhpString ToPhpString(PhpValue value, Context ctx) => value.TypeCode switch
+        {
+            PhpTypeCode.Null => default,
+            PhpTypeCode.Boolean => Convert.ToString(value.Boolean),
+            PhpTypeCode.Long => Convert.ToString(value.Long),
+            PhpTypeCode.Double => Convert.ToString(value.Double),
+            PhpTypeCode.String => value.String,
+            PhpTypeCode.MutableString => value.MutableString,
+            PhpTypeCode.Object => Convert.ToString(value.Object),
+            PhpTypeCode.Alias => ToPhpString(value.Alias.Value, ctx),
             _ => throw PhpException.TypeErrorException(),
         };
 

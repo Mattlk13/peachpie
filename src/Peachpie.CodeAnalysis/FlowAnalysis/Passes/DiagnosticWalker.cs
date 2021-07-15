@@ -399,6 +399,11 @@ namespace Pchp.CodeAnalysis.FlowAnalysis.Passes
                     _diagnostics.Add(_routine, x.PhpSyntax, ErrorCode.ERR_VoidFunctionCannotReturnValue);
                 }
 
+                if (_routine.SyntaxReturnType.IsNever())
+                {
+                    _diagnostics.Add(_routine, x.PhpSyntax ?? _routine.SyntaxReturnType, ErrorCode.ERR_NeverReturningFunctionCannotReturn);
+                }
+
                 if (x.Returned == null)
                 {
                     if (!_routine.SyntaxReturnType.IsVoid())
@@ -762,9 +767,11 @@ namespace Pchp.CodeAnalysis.FlowAnalysis.Passes
                     // check we only pass object instances to the "clone" operation
                     // anything else causes a runtime warning!
                     var operandTypeMask = x.Operand.TypeRefMask;
-                    if (!operandTypeMask.IsAnyType &&
-                        !operandTypeMask.IsRef &&
-                        !TypeCtx.IsObjectOnly(operandTypeMask))
+                    if (operandTypeMask.IsAnyType || operandTypeMask.IsRef)
+                    {
+                        // we don't know
+                    }
+                    else if (!TypeCtx.IsObjectOnly(TypeCtx.WithoutNull(operandTypeMask)))   // ignore "null" type if it's with combination with object
                     {
                         _diagnostics.Add(_routine, x.PhpSyntax, ErrorCode.WRN_CloneNonObject, TypeCtx.ToString(operandTypeMask));
                     }

@@ -6,6 +6,7 @@ using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 using Pchp.CodeAnalysis;
+using Pchp.CodeAnalysis.CodeGen;
 using Pchp.CodeAnalysis.Symbols;
 using Peachpie.CodeAnalysis.Utilities;
 
@@ -180,6 +181,11 @@ namespace Pchp.CodeAnalysis.Semantics
                 return ExplicitNumeric;
         }
 
+        public CommonConversion StringToPhpString()
+        {
+            return new CommonConversion(true, false, false, false, true, false, _compilation.CoreMethods.PhpString.implicit_from_string.Symbol);
+        }
+
         // resolve operator method
         public MethodSymbol ResolveOperator(TypeSymbol receiver, bool hasref, string[] opnames, TypeSymbol[] extensions, TypeSymbol operand = null, TypeSymbol target = null)
         {
@@ -217,6 +223,12 @@ namespace Pchp.CodeAnalysis.Semantics
                                 if (target != null && method.ReturnType != target)
                                 {
                                     var conv = ClassifyConversion(method.ReturnType, target, ConversionKind.Numeric | ConversionKind.Reference);
+                                    if (conv.Exists == false && method.ReturnType.SpecialType == SpecialType.System_String && target.Is_PhpString())
+                                    {
+                                        // String -> PhpString implicitly
+                                        conv = StringToPhpString();
+                                    }
+
                                     if (conv.Exists)    // TODO: chain the conversion, sum the cost
                                     {
                                         cost += ConvCost(conv, method.ReturnType, target);
@@ -339,7 +351,7 @@ namespace Pchp.CodeAnalysis.Semantics
                     if (target == _compilation.CoreTypes.PhpNumber.Symbol) return new[] { WellKnownMemberNames.ImplicitConversionName, "ToNumber" };
 
                     // ToPhpString
-                    if (target == _compilation.CoreTypes.PhpString.Symbol) return new[] { WellKnownMemberNames.ImplicitConversionName, "ToPhpString" };
+                    if (target == _compilation.CoreTypes.PhpString.Symbol) return new[] { WellKnownMemberNames.ImplicitConversionName, "ToPhpString", "ToString" };
 
                     // AsResource
                     // AsObject
@@ -376,7 +388,7 @@ namespace Pchp.CodeAnalysis.Semantics
                     if (target == _compilation.CoreTypes.PhpNumber.Symbol) return new[] { WellKnownMemberNames.ExplicitConversionName, "ToNumber" };
 
                     // ToPhpString
-                    if (target == _compilation.CoreTypes.PhpString.Symbol) return new[] { WellKnownMemberNames.ExplicitConversionName, "ToPhpString" };
+                    if (target == _compilation.CoreTypes.PhpString.Symbol) return new[] { WellKnownMemberNames.ExplicitConversionName, "ToPhpString", "ToString" };
 
                     // ToPhpValue
                     // ToPhpAlias
@@ -471,6 +483,16 @@ namespace Pchp.CodeAnalysis.Semantics
                 }
             }
 
+            // Nullable{T}
+            if (from.IsNullableType(out var ttype))
+            {
+                var conv = ClassifyConversion(ttype, to, kinds);
+                if (conv.Exists)
+                {
+                    return conv.WithIsNullable(true);
+                }
+            }
+
             // resolve conversion operator method:
             if ((kinds & ConversionKind.Numeric) == ConversionKind.Numeric)
             {
@@ -494,6 +516,12 @@ namespace Pchp.CodeAnalysis.Semantics
             // implicit
             if ((kinds & ConversionKind.Implicit) == ConversionKind.Implicit)
             {
+                // string -> PhpString implicitly
+                if (from.SpecialType == SpecialType.System_String && to.Is_PhpString())
+                {
+                    return StringToPhpString();
+                }
+
                 var op = TryWellKnownImplicitConversion(from, to) ?? ResolveOperator(from, false, ImplicitConversionOpNames(to), new[] { to, _compilation.CoreTypes.Convert.Symbol }, target: to);
                 if (op != null)
                 {

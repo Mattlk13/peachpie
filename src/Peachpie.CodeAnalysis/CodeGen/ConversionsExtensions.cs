@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Text;
 using Microsoft.CodeAnalysis.Operations;
-using Microsoft.CodeAnalysis.CodeGen;
 using Pchp.CodeAnalysis.Symbols;
 using System.Reflection.Metadata;
 using System.Diagnostics;
@@ -48,12 +47,14 @@ namespace Pchp.CodeAnalysis.CodeGen
             return true;
         }
 
-        public static void EmitImplicitConversion(this CodeGenerator cg, TypeSymbol from, TypeSymbol to, bool @checked = false, bool strict = false)
+        public static TypeSymbol EmitImplicitConversion(this CodeGenerator cg, TypeSymbol from, TypeSymbol to, bool @checked = false, bool strict = false)
         {
             if (!TryEmitImplicitConversion(cg, from, to, @checked, strict))
             {
                 throw cg.NotImplementedException($"Cannot implicitly convert '{from}' to '{to}'");
             }
+
+            return to;
         }
 
         public static void EmitNumericConversion(this CodeGenerator cg, TypeSymbol from, TypeSymbol to, bool @checked = false)
@@ -66,6 +67,23 @@ namespace Pchp.CodeAnalysis.CodeGen
             if (from.IsEnumType())
             {
                 from = from.GetEnumUnderlyingType();
+            }
+
+            if (from.SpecialType == SpecialType.System_Decimal)
+            {
+                // explicit numeric conversion, treating decimal as double
+
+                // (double)System.Decimal
+                from = cg.EmitCall(
+                    ILOpCode.Call,
+                    (MethodSymbol)cg.DeclaringCompilation.GetWellKnownTypeMember(WellKnownMember.System_Convert__ToDoubleDecimal));
+            }
+
+            if (to.SpecialType == SpecialType.System_Decimal)
+            {
+                // convert to double and then to decimal
+                EmitNumericConversion(cg, from, cg.CoreTypes.Double, @checked);
+                throw new NotImplementedException("double -> decimal");
             }
 
             var fromcode = from.PrimitiveTypeCode;
@@ -115,6 +133,55 @@ namespace Pchp.CodeAnalysis.CodeGen
             if (conversion.Exists == false)
             {
                 throw cg.NotImplementedException($"Conversion from '{from}' to '{to}' ");
+            }
+
+            if (conversion.IsNullable)
+            {
+                if (from.IsNullableType(out var ttype))
+                {
+                    if (op != null)
+                    {
+                        // TODO
+                        throw new ArgumentException(nameof(op));
+                    }
+
+                    var lbltrue = new NamedLabel("has value");
+                    var lblend = new NamedLabel("end");
+                    var tmp = cg.GetTemporaryLocal(from, true);
+                    cg.Builder.EmitLocalStore(tmp);
+
+                    // Template: tmp.HasValue ? convert(tmp.Value) : default
+                    cg.Builder.EmitLocalAddress(tmp);
+                    cg.EmitCall(ILOpCode.Call, cg.DeclaringCompilation.System_Nullable_T_HasValue(from));
+                    cg.Builder.EmitBranch(ILOpCode.Brtrue, lbltrue);
+
+                    // default:
+                    cg.EmitLoadDefault(to);
+                    cg.Builder.EmitBranch(ILOpCode.Br, lblend);
+                    // cg.Builder.AdjustStack(-1); // ?
+
+                    // lbltrue:
+                    cg.Builder.MarkLabel(lbltrue);
+                    // Template: convert( tmp.GetValueOrDefault() )
+                    cg.Builder.EmitLocalAddress(tmp);
+                    cg.EmitCall(ILOpCode.Call, cg.DeclaringCompilation.System_Nullable_T_GetValueOrDefault(from)).Expect(ttype);
+                    EmitConversion(cg, conversion.WithIsNullable(false), ttype, to, op, @checked);
+
+                    // lblend:
+                    cg.Builder.MarkLabel(lblend);
+
+                    return;
+                }
+
+                if (to.IsNullableType(out ttype)) // NOTE: not used yet
+                {
+                    // new Nullable<TType>( convert(from) )
+                    EmitConversion(cg, conversion.WithIsNullable(false), from, ttype, op, @checked);
+                    cg.EmitCall(ILOpCode.Newobj, ((NamedTypeSymbol)to).InstanceConstructors[0]); // new Nullable<T>( STACK )
+                    return;
+                }
+
+                throw Roslyn.Utilities.ExceptionUtilities.Unreachable;
             }
 
             if (conversion.IsIdentity)
@@ -213,6 +280,11 @@ namespace Pchp.CodeAnalysis.CodeGen
             {
                 throw new NotImplementedException();
             }
+        }
+
+        public static CommonConversion WithIsNullable(this CommonConversion conv, bool isNullable)
+        {
+            return new CommonConversion(conv.Exists, conv.IsIdentity, conv.IsNumeric, conv.IsReference, conv.IsImplicit, isNullable, conv.MethodSymbol);
         }
     }
 }

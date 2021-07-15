@@ -885,38 +885,39 @@ namespace Pchp.Library.Streams
         /// </remarks>
         public static PhpArray stream_get_meta_data(PhpResource resource)
         {
-            PhpStream stream = PhpStream.GetValid(resource);
+            var stream = PhpStream.GetValid(resource);
             if (stream == null)
             {
                 return null;
             }
 
+            //
             var result = new PhpArray(10);
 
             // TODO: timed_out (bool) - TRUE if the stream timed out while waiting for data on the last call to fread() or fgets().
             // TODO: blocked (bool) - TRUE if the stream is in blocking IO mode. See stream_set_blocking().
             result["blocked"] = PhpValue.True;
             // eof (bool) - TRUE if the stream has reached end-of-file. Note that for socket streams this member can be TRUE even when unread_bytes is non-zero. To determine if there is more data to be read, use feof() instead of reading this item.
-            result["eof"] = (PhpValue)stream.Eof;
+            result["eof"] = stream.Eof;
             // TODO: unread_bytes (int) - the number of bytes currently contained in the PHP's own internal buffer.
-            result["unread_bytes"] = (PhpValue)0;
+            result["unread_bytes"] = 0;
             // TODO: stream_type (string) - a label describing the underlying implementation of the stream.
-            result["stream_type"] = (PhpValue)((stream.Wrapper != null) ? stream.Wrapper.Label : string.Empty);
+            result["stream_type"] = (stream.Wrapper != null) ? stream.Wrapper.Label : string.Empty;
             // wrapper_type (string) - a label describing the protocol wrapper implementation layered over the stream. See List of Supported Protocols/Wrappers for more information about wrappers.
-            result["wrapper_type"] = (PhpValue)((stream.Wrapper != null) ? stream.Wrapper.Scheme : string.Empty);
+            result["wrapper_type"] = (stream.Wrapper != null) ? stream.Wrapper.Scheme : string.Empty;
             // wrapper_data (mixed) - wrapper specific data attached to this stream. See List of Supported Protocols/Wrappers for more information about wrappers and their wrapper data.
             if (stream.WrapperSpecificData != null)
             {
                 result["wrapper_data"] = PhpValue.FromClr(stream.WrapperSpecificData);
             }
             // filters (array) - and array containing the names of any filters that have been stacked onto this stream. Documentation on filters can be found in the Filters appendix.
-            result["filters"] = (PhpValue)GetFiltersName(stream);
+            result["filters"] = GetFiltersName(stream);
             // mode (string) - the type of access required for this stream (see Table 1 of the fopen() reference)
-            result["mode"] = (PhpValue)(stream.CanRead ? (stream.CanWrite ? "r+" : "r") : (stream.CanWrite ? "w" : string.Empty));
+            result["mode"] = GetFileMode(stream.Options);
             // seekable (bool) - whether the current stream can be seeked.
-            result["seekable"] = (PhpValue)stream.CanSeek;
+            result["seekable"] = stream.CanSeek;
             // uri (string) - the URI/filename associated with this stream.
-            result["uri"] = (PhpValue)stream.OpenedPath;
+            result["uri"] = stream.OpenedPath;
 
             //
             return result;
@@ -938,6 +939,40 @@ namespace Pchp.Library.Streams
             }
 
             return array;
+        }
+
+        /// <summary>
+        /// Restores the file mode from the stream options.
+        /// See <c>StreamWrapper.ParseMode</c>c> for details.
+        /// </summary>
+        static string GetFileMode(StreamAccessOptions options)
+        {
+            var mode = (options & StreamAccessOptions.ModeMask) switch
+            {
+                StreamAccessOptions.Truncate => "w",
+                StreamAccessOptions.Append => "a",
+                StreamAccessOptions.Exclusive => "x",
+                StreamAccessOptions.Create => "c",
+                _ => "r",
+            };
+
+            if ((options & StreamAccessOptions.Read) != 0 && (options & StreamAccessOptions.Write) != 0)
+            {
+                mode += "+";
+            }
+
+            // last flag: 't' or 'b'
+            if ((options & StreamAccessOptions.UseText) != 0)
+            {
+                mode += "t";
+            }
+            else
+            {
+                mode += "b";
+            }
+
+            //
+            return mode;
         }
 
         #endregion
@@ -965,12 +1000,17 @@ namespace Pchp.Library.Streams
 
         /// <summary>Set blocking/non-blocking (synchronous/asynchronous I/O operations) mode on a stream.</summary>
         /// <param name="resource">A handle to a stream resource.</param>
-        /// <param name="mode"><c>1</c> for blocking, <c>0</c> for non-blocking.</param>
+        /// <param name="enable">
+        /// If enable is false, the given stream will be switched to non-blocking mode,
+        /// and if true, it will be switched to blocking mode.
+        /// This affects calls like fgets() and fread() that read from the stream.
+        /// In non-blocking mode an fgets() call will always return right away while
+        /// in blocking mode it will wait for data to become available on the stream.</param>
         /// <returns><c>true</c> if the operation is supported and was successful, <c>false</c> otherwise.</returns>
-        public static bool stream_set_blocking(PhpResource resource, int mode)
+        public static bool stream_set_blocking(PhpResource resource, bool enable)
         {
             var stream = PhpStream.GetValid(resource);
-            return stream != null && stream.SetParameter(StreamParameterOptions.BlockingMode, (PhpValue)(mode > 0));
+            return stream != null && stream.SetParameter(StreamParameterOptions.BlockingMode, enable);
         }
 
         /// <summary>Set timeout period on a stream</summary>

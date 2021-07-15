@@ -109,7 +109,7 @@ namespace Pchp.Library.Streams
             return false;
         }
 
-        public virtual StatStruct Stat(string root, string path, StreamStatOptions options, StreamContext context, bool streamStat)
+        public virtual StatStruct Stat(string root, string path, StreamStatOptions options, StreamContext context, PhpStream stream = null)
         {
             // int (*url_stat)(php_stream_wrapper *wrapper, char *url, int flags, php_stream_statbuf *ssb, php_stream_context *context TSRMLS_DC);
             return StatUnsupported();
@@ -188,14 +188,14 @@ namespace Pchp.Library.Streams
 
             // Search for the file only if mode=='[ra]*' and use_include_path==true.
             // StreamAccessOptions findFile = 0;
-            if ((options & StreamOpenOptions.UseIncludePath) > 0)
+            if ((options & StreamOpenOptions.UseIncludePath) != 0)
             {
                 // findFile = StreamAccessOptions.FindFile;
                 accessOptions |= StreamAccessOptions.FindFile;
             }
 
             // Copy the AutoRemove option.
-            if ((options & StreamOpenOptions.Temporary) > 0)
+            if ((options & StreamOpenOptions.Temporary) != 0)
             {
                 accessOptions |= StreamAccessOptions.Temporary;
             }
@@ -203,7 +203,7 @@ namespace Pchp.Library.Streams
             // Now do the actual mode parsing:
             fileMode = FileMode.Open;
             fileAccess = FileAccess.Write;
-            if (String.IsNullOrEmpty(mode))
+            if (string.IsNullOrEmpty(mode))
             {
                 PhpException.Throw(PhpError.Warning, ErrResources.empty_file_mode);
                 return false;
@@ -222,12 +222,13 @@ namespace Pchp.Library.Streams
                     break;
 
                 case 'w':
-                    // flags = O_TRUNC|O_CREAT;
+                    // flags = O_CREAT|O_TRUNC;
                     // fileAccess is set to Write
                     fileMode = FileMode.Create;
+                    accessOptions |= StreamAccessOptions.Truncate;
                     //accessOptions |= findFile;
                     // EX: Note that use_include_path is applicable to all access methods.
-                    // Create truncates the existing file to zero length
+                    // Creates or truncates the existing file to zero length
                     break;
 
                 case 'a':
@@ -235,6 +236,7 @@ namespace Pchp.Library.Streams
                     // fileAccess is set to Write
                     fileMode = FileMode.Append;
                     //accessOptions |= findFile;
+                    accessOptions |= StreamAccessOptions.Append;
                     // Note: .NET does not support the "a+" mode, use "r+" and Seek()
                     break;
 
@@ -249,6 +251,7 @@ namespace Pchp.Library.Streams
                     // flags = O_CREAT;
                     fileMode = FileMode.OpenOrCreate;
                     fileAccess = FileAccess.Write;
+                    accessOptions |= StreamAccessOptions.Create;
                     break;
 
                 default:
@@ -256,7 +259,7 @@ namespace Pchp.Library.Streams
                     return false;
             }
 
-            if (mode.IndexOf('+') > -1)
+            if (mode.IndexOf('+') >= 0)
             {
                 // flags |= O_RDWR;
                 fileAccess = FileAccess.ReadWrite;
@@ -270,12 +273,12 @@ namespace Pchp.Library.Streams
                 accessOptions |= StreamAccessOptions.SeekEnd;
             }
 
-            if (mode.IndexOf('b') > -1)
+            if (mode.IndexOf('b') >= 0)
             {
                 // flags |= O_BINARY;
                 forceBinary = true;
             }
-            if (mode.IndexOf('t') > -1)
+            if (mode.IndexOf('t') >= 0)
             {
                 // flags |= _O_TEXT;
                 forceText = true;
@@ -583,14 +586,13 @@ namespace Pchp.Library.Streams
             //Debug.Assert(PhpPath.IsLocalFile(path));
 
             // Get the File.Open modes from the mode string
-            FileMode fileMode;
-            FileAccess fileAccess;
-            StreamAccessOptions ao;
-
-            if (!ParseMode(ctx, mode, options, out fileMode, out fileAccess, out ao)) return null;
+            if (!ParseMode(ctx, mode, options, out var fileMode, out var fileAccess, out var ao))
+            {
+                return null;
+            }
 
             // Open the native stream
-            FileStream stream = null;
+            FileStream stream;
             try
             {
                 // stream = File.Open(path, fileMode, fileAccess, FileShare.ReadWrite);
@@ -605,7 +607,7 @@ namespace Pchp.Library.Streams
             }
             catch (IOException e)
             {
-                if ((ao & StreamAccessOptions.Exclusive) > 0)
+                if ((ao & StreamAccessOptions.Exclusive) != 0)
                 {
                     PhpException.Throw(PhpError.Warning, ErrResources.stream_file_exists, FileSystemUtils.StripPassword(path));
                 }
@@ -626,13 +628,13 @@ namespace Pchp.Library.Streams
                 return null;
             }
 
-            if ((ao & StreamAccessOptions.SeekEnd) > 0)
+            if ((ao & StreamAccessOptions.SeekEnd) != 0)
             {
                 // Read/Write Append is not supported. Seek to the end of file manually.
                 stream.Seek(0, SeekOrigin.End);
             }
 
-            if ((ao & StreamAccessOptions.Temporary) > 0)
+            if ((ao & StreamAccessOptions.Temporary) != 0)
             {
                 // Set the file attributes to Temporary too.
                 File.SetAttributes(path, FileAttributes.Temporary);
@@ -705,8 +707,9 @@ namespace Pchp.Library.Streams
         /// <param name="info">A <see cref="FileInfo"/> or <see cref="DirectoryInfo"/>
         /// of the <c>stat()</c>ed filesystem entry.</param>
         /// <param name="path">The path to the file / directory.</param>
+        /// <param name="streamLength">Size hint if called from an opened stream. This workaround "stat" functionality for files opened for writing.</param>
         /// <returns>A <see cref="StatStruct"/> for use in the <c>stat()</c> related functions.</returns>    
-        internal static StatStruct BuildStatStruct(FileSystemInfo info, string path)
+        internal static StatStruct BuildStatStruct(FileSystemInfo info, string path, long streamLength)
         {
             uint device = unchecked((uint)(char.ToLowerInvariant(info.FullName[0]) - 'a')); // index of the disk // TODO: unix
 
@@ -718,7 +721,7 @@ namespace Pchp.Library.Streams
                 st_mode: BuildMode(info, path),
                 st_nlink: 1,
                 st_rdev: device,
-                st_size: info is FileInfo finfo ? finfo.Length : 0,
+                st_size: Math.Max(info is FileInfo finfo ? finfo.Length : 0, streamLength),
                 st_atime: ToStatUnixTimeStamp(info, (_info) => _info.LastAccessTimeUtc),
                 st_mtime: ToStatUnixTimeStamp(info, (_info) => _info.LastWriteTimeUtc),
                 st_ctime: ToStatUnixTimeStamp(info, (_info) => _info.CreationTimeUtc)
@@ -928,7 +931,7 @@ namespace Pchp.Library.Streams
             return rv;
         }
 
-        public override StatStruct Stat(string root, string path, StreamStatOptions options, StreamContext context, bool streamStat)
+        public override StatStruct Stat(string root, string path, StreamStatOptions options, StreamContext context, PhpStream stream)
         {
             Debug.Assert(path != null);
 
@@ -961,7 +964,11 @@ namespace Pchp.Library.Streams
 
             if (info != null)
             {
-                return BuildStatStruct(info, path);
+                // native "stat" gets the actual size of the opened file handle,
+                // although FileInfo gives us zero if the file is currently locked (stream != null)
+                var streamLength = stream is NativeStream native ? native.RawStream.Length : -1;
+
+                return BuildStatStruct(info, path, streamLength);
             }
 
             // compiled script
@@ -1919,11 +1926,11 @@ namespace Pchp.Library.Streams
             return base.Rename(fromPath, toPath, options, context);
         }
 
-        public override StatStruct Stat(string root, string path, StreamStatOptions options, StreamContext context, bool streamStat)
+        public override StatStruct Stat(string root, string path, StreamStatOptions options, StreamContext context, PhpStream stream)
         {
-            PhpArray arr = (streamStat ?
+            PhpArray arr = (stream != null ?
                 InvokeWrapperMethod(PhpUserStream.USERSTREAM_STAT) :
-                InvokeWrapperMethod(PhpUserStream.USERSTREAM_STATURL, (PhpValue)path, (PhpValue)(int)options)).ArrayOrNull();
+                InvokeWrapperMethod(PhpUserStream.USERSTREAM_STATURL, path, (int)options)).ArrayOrNull();
 
             if (arr != null)
             {

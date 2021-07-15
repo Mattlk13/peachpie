@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
@@ -169,9 +170,10 @@ namespace Pchp.CodeAnalysis
 
                 if (obj == null) result = string.Empty;
                 else if (obj is string str) result = str;
-                else if (obj is long l) result = l.ToString();
+                else if (obj is long l) result = l.ToString(CultureInfo.InvariantCulture);
                 else if (obj is bool b) result = b ? "1" : string.Empty;
-                else if (obj is int i) result = i.ToString();
+                else if (obj is int i) result = i.ToString(CultureInfo.InvariantCulture);
+                // else if (obj is double d) result = d.ToString(CultureInfo.InvariantCulture) // NOTE: NegativeInfinitySymbol = "-INF", PositiveInfinitySymbol = "INF", NaNSymbol = "NAN"
             }
 
             return result != null;
@@ -193,6 +195,15 @@ namespace Pchp.CodeAnalysis
         /// Boxes <see cref="bool"/> into object without memory allocation.
         /// </summary>
         public static object AsObject(this bool b) => b ? s_true : s_false;
+
+        /// <summary>
+        /// Boxes <see cref="long"/> into object without memory allocation.
+        /// </summary>
+        public static object AsObject(this long l) => l switch
+        {
+            0 => s_long_zero,
+            _ => (object)l,
+        };
 
         /// <summary>
         /// Gets <see cref="Optional{Object}"/> of <see cref="bool"/>.

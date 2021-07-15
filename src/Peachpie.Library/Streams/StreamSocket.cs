@@ -236,11 +236,7 @@ namespace Pchp.Library.Streams
         /// </summary>
         public static PhpResource stream_socket_server(Context ctx, string localSocket)
         {
-            int errno;
-            string errstr;
-            int port = 0;
-            //SplitSocketAddressPort(ref localSocket, out port);
-            return Connect(ctx, localSocket, port, out errno, out errstr, Double.NaN, SocketOptions.None, StreamContext.Default);
+            return stream_socket_server(ctx, localSocket, out _, out _, SocketOptions.None, StreamContext.Default);
         }
 
         /// <summary>
@@ -248,10 +244,7 @@ namespace Pchp.Library.Streams
         /// </summary>
         public static PhpResource stream_socket_server(Context ctx, string localSocket, out int errno)
         {
-            string errstr;
-            int port = 0;
-            //SplitSocketAddressPort(ref localSocket, out port);
-            return Connect(ctx, localSocket, port, out errno, out errstr, Double.NaN, SocketOptions.None, StreamContext.Default);
+            return stream_socket_server(ctx, localSocket, out errno, out _, SocketOptions.None, StreamContext.Default);
         }
 
         /// <summary>
@@ -259,9 +252,7 @@ namespace Pchp.Library.Streams
         /// </summary>
         public static PhpResource stream_socket_server(Context ctx, string localSocket, out int errno, out string errstr, SocketOptions flags = SocketOptions.None)
         {
-            int port = 0;
-            //SplitSocketAddressPort(ref localSocket, out port);
-            return Connect(ctx, localSocket, port, out errno, out errstr, Double.NaN, flags, StreamContext.Default);
+            return stream_socket_server(ctx, localSocket, out errno, out errstr, flags, StreamContext.Default);
         }
 
         /// <summary>
@@ -269,17 +260,41 @@ namespace Pchp.Library.Streams
         /// </summary>
         public static PhpResource stream_socket_server(Context ctx, string localSocket, out int errno, out string errstr, SocketOptions flags, PhpResource context)
         {
-            StreamContext sc = StreamContext.GetValid(context);
+            // defaults:
+            errno = 0;
+            errstr = string.Empty;
+
+            var sc = StreamContext.GetValid(context);
             if (sc == null)
             {
-                errno = -1;
-                errstr = null;
                 return null;
             }
 
+            //
             int port = 0;
-            //SplitSocketAddressPort(ref localSocket, out port);
-            return Connect(ctx, localSocket, port, out errno, out errstr, Double.NaN, flags, sc);
+
+            if (TryParseSocketAddr(localSocket, out _, out var protocol, ref port, out var address))
+            {
+                try
+                {
+                    var socket = new Socket(address.AddressFamily, SocketType.Stream, protocol);
+                    socket.Bind(new IPEndPoint(address, port));
+                    //socket.GetSocketOption(SocketOptionLevel.Socket, SocketOptionName.MaxConnections) // Not Supported
+                    socket.Listen(512); // NOTE: a default backlog should be used
+
+                    return new SocketStream(ctx, socket, localSocket, sc);
+                }
+                catch (SocketException e)
+                {
+                    errno = e.ErrorCode;
+                    errstr = e.Message;
+                    return null;
+                }
+            }
+            else
+            {
+                return null;
+            }
         }
 
         #endregion
@@ -289,32 +304,55 @@ namespace Pchp.Library.Streams
         /// <summary>
         /// Accepts a connection on a server socket.
         /// </summary>
-        public static bool stream_socket_accept(Context ctx, PhpResource serverSocket)
+        [return: CastToFalse]
+        public static PhpResource stream_socket_accept(Context ctx, PhpResource serverSocket)
         {
-            return stream_socket_accept(serverSocket, ctx.Configuration.Core.DefaultSocketTimeout, out _);
+            return stream_socket_accept(ctx, serverSocket, ctx.Configuration.Core.DefaultSocketTimeout, out _);
         }
 
         /// <summary>
         /// Accepts a connection on a server socket.
         /// </summary>
-        public static bool stream_socket_accept(PhpResource serverSocket, int timeout)
+        [return: CastToFalse]
+        public static PhpResource stream_socket_accept(Context ctx, PhpResource serverSocket, double timeout)
         {
-            string peerName;
-            return stream_socket_accept(serverSocket, timeout, out peerName);
+            return stream_socket_accept(ctx, serverSocket, timeout, out _);
         }
 
         /// <summary>
         /// Accepts a connection on a server socket.
         /// </summary>
-        public static bool stream_socket_accept(PhpResource serverSocket, int timeout, out string peerName)
+        [return: CastToFalse]
+        public static PhpResource stream_socket_accept(Context ctx, PhpResource serverSocket, double timeout, out string peerName)
         {
-            peerName = "";
+            peerName = string.Empty;
 
-            SocketStream stream = SocketStream.GetValid(serverSocket);
-            if (stream == null) return false;
+            var stream = SocketStream.GetValid(serverSocket);
+            if (stream == null) return null;
 
-            PhpException.FunctionNotSupported("stream_socket_accept");
-            return false;
+            try
+            {
+                var result = stream.Socket.BeginAccept(null, stream.Socket);
+                Debug.Assert(result != null, "BeginAccept() returned null.");
+
+                if (result.AsyncWaitHandle.WaitOne(timeout < 0 ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(timeout)))
+                {
+                    var socket = stream.Socket.EndAccept(result);
+                    socket.NoDelay = true; // blocking
+                    return new SocketStream(ctx, socket, stream.OpenedPath, stream.Context);
+                }
+                else
+                {
+                    // timeout
+                    PhpException.Throw(PhpError.Warning, Resources.LibResources.socket_accept_timeout);
+                }
+            }
+            catch (SocketException e)
+            {
+                PhpException.Throw(PhpError.Warning, e.Message);
+            }
+
+            return null; // ~FALSE
         }
 
         #endregion
@@ -323,19 +361,17 @@ namespace Pchp.Library.Streams
 
         public static string stream_socket_recvfrom(PhpResource socket, int length, SendReceiveOptions flags = SendReceiveOptions.None)
         {
-            string address;
-            return stream_socket_recvfrom(socket, length, flags, out address);
+            return stream_socket_recvfrom(socket, length, flags, out _);
         }
 
-        public static string stream_socket_recvfrom(PhpResource socket, int length, SendReceiveOptions flags,
-          out string address)
+        public static string stream_socket_recvfrom(PhpResource socket, int length, SendReceiveOptions flags, out string address)
         {
             address = null;
 
-            SocketStream stream = SocketStream.GetValid(socket);
+            var stream = SocketStream.GetValid(socket);
             if (stream == null) return null;
 
-            PhpException.FunctionNotSupported("stream_socket_recvfrom");
+            PhpException.FunctionNotSupported(nameof(stream_socket_recvfrom));
             return null;
         }
 
@@ -345,10 +381,10 @@ namespace Pchp.Library.Streams
 
         public static int stream_socket_sendto(PhpResource socket, string data, SendReceiveOptions flags = SendReceiveOptions.None, string address = null)
         {
-            SocketStream stream = SocketStream.GetValid(socket);
+            var stream = SocketStream.GetValid(socket);
             if (stream == null) return -1;
 
-            PhpException.FunctionNotSupported("stream_socket_sendto");
+            PhpException.FunctionNotSupported(nameof(stream_socket_sendto));
             return -1;
         }
 
@@ -497,30 +533,25 @@ namespace Pchp.Library.Streams
             return sslstream;
         }
 
-        /// <summary>
-        /// Opens a new SocketStream
-        /// </summary>
-        internal static SocketStream Connect(Context ctx, string remoteSocket, int port, out int errno, out string errstr, double timeout, SocketOptions flags, StreamContext/*!*/ context)
+        static bool TryParseSocketAddr(string addressString, out bool isSsl, out ProtocolType protocol, ref int port, out IPAddress address)
         {
-            errno = 0;
-            errstr = null;
+            isSsl = false;
+            protocol = ProtocolType.Tcp;
+            address = IPAddress.Any;
 
-            if (remoteSocket == null)
+            if (addressString == null)
             {
-                PhpException.ArgumentNull(nameof(remoteSocket));
-                return null;
+                PhpException.ArgumentNull(nameof(addressString));
+                return false;
             }
-
-            bool isSsl = false;
 
             // TODO: extract schema (tcp://, udp://) and port from remoteSocket
             // Uri uri = Uri.TryCreate(remoteSocket);
             const string protoSeparator = "://";
-            var protocol = ProtocolType.Tcp;
-            var protoIdx = remoteSocket.IndexOf(protoSeparator, StringComparison.Ordinal);
+            var protoIdx = addressString.IndexOf(protoSeparator, StringComparison.Ordinal);
             if (protoIdx >= 0)
             {
-                var protoStr = remoteSocket.AsSpan(0, protoIdx);
+                var protoStr = addressString.AsSpan(0, protoIdx);
                 if (protoStr.Equals("udp".AsSpan(), StringComparison.Ordinal))
                 {
                     protocol = ProtocolType.Udp;
@@ -530,14 +561,25 @@ namespace Pchp.Library.Streams
                     // use SSL encryption
                     isSsl = true;
                 }
+                else if (protoStr.Equals("tcp".AsSpan(), StringComparison.Ordinal))
+                {
+                    protocol = ProtocolType.Tcp;
+                }
+                else
+                {
+                    // Unable to find the socket transport {protoStr}
+                    //PhpException.Throw(PhpError.Warning, Resources.LibResources.socket_invalid_protocol, protoStr);
+                    PhpException.Throw(PhpError.Warning, "Unable to find the socket transport '{0}'", protoStr.ToString());
+                    return false;
+                }
 
-                remoteSocket = remoteSocket.Substring(protoIdx + protoSeparator.Length);
+                addressString = addressString.Substring(protoIdx + protoSeparator.Length);
             }
 
-            var colonIdx = remoteSocket.IndexOf(':');
+            var colonIdx = addressString.IndexOf(':');
             if (colonIdx >= 0)
             {
-                var portStr = remoteSocket.AsSpan(colonIdx + 1);
+                var portStr = addressString.AsSpan(colonIdx + 1);
                 if (portStr.Length != 0 &&
                     int.TryParse(portStr.ToString(), out var n) &&    // TODO: (perf) ReadOnlySpan<char>
                     n > 0 && n <= 0xffff)
@@ -545,7 +587,38 @@ namespace Pchp.Library.Streams
                     port = n;
                 }
 
-                remoteSocket = remoteSocket.Remove(colonIdx);
+                addressString = addressString.Remove(colonIdx);
+            }
+
+            if (!IPAddress.TryParse(addressString, out address)) // if remoteSocket is not a valid IP address then lookup the DNS
+            {
+                var addresses = Dns.GetHostAddresses(addressString);
+                if (addresses != null && addresses.Length != 0)
+                {
+                    address = addresses[0];
+                }
+                else
+                {
+                    throw new ArgumentException(nameof(addressString));
+                    // return false;
+                }
+            }
+
+            //
+            return true;
+        }
+
+        /// <summary>
+        /// Opens a new SocketStream
+        /// </summary>
+        internal static SocketStream Connect(Context ctx, string remoteSocket, int port, out int errno, out string errstr, double timeout, SocketOptions flags, StreamContext/*!*/ context)
+        {
+            errno = 0;
+            errstr = string.Empty;
+
+            if (!TryParseSocketAddr(remoteSocket, out var isSsl, out var protocol, ref port, out var address))
+            {
+                return null;
             }
 
             if (double.IsNaN(timeout))
@@ -556,7 +629,7 @@ namespace Pchp.Library.Streams
             // TODO:
             if (flags != SocketOptions.None && flags != SocketOptions.Asynchronous)
             {
-                PhpException.ArgumentValueNotSupported("flags", (int)flags);
+                PhpException.ArgumentValueNotSupported(nameof(flags), (int)flags);
             }
 
             var connect_async = (flags & SocketOptions.Asynchronous) != 0;
@@ -566,20 +639,10 @@ namespace Pchp.Library.Streams
                 // workitem 299181; for remoteSocket as IPv4 address it results in IPv6 address
                 //IPAddress address = System.Net.Dns.GetHostEntry(remoteSocket).AddressList[0];
 
-                if (!IPAddress.TryParse(remoteSocket, out var address)) // if remoteSocket is not a valid IP address then lookup the DNS
+                var socket = new Socket(address.AddressFamily, SocketType.Stream, protocol)
                 {
-                    var addresses = System.Net.Dns.GetHostAddressesAsync(remoteSocket).Result;
-                    if (addresses != null && addresses.Length != 0)
-                    {
-                        address = addresses[0];
-                    }
-                    else
-                    {
-                        throw new ArgumentException(nameof(remoteSocket));
-                    }
-                }
-
-                var socket = new Socket(address.AddressFamily, SocketType.Stream, protocol);
+                    NoDelay = true, // blocking
+                };
 
                 // socket.Connect(new IPEndPoint(address, port));
                 if (socket.ConnectAsync(address, port).Wait((int)(timeout * 1000)))

@@ -69,8 +69,7 @@ namespace Pchp.Library
             if (count == 0) return new PhpString();
 
             // determines the result length (length) and the working buffer size (size):
-            int length, size;
-            GetPackedDataSize(specifiers, repeaters, count, out length, out size);
+            GetPackedDataSize(specifiers, repeaters, count, out var length, out var size);
 
             // packs data using buffer:
             var buffer = new byte[size];
@@ -654,14 +653,17 @@ namespace Pchp.Library
                             break;
 
                         case 'i': // signed integer (machine dependent size and byte order - always 32 bit) 
-                        case 'I': // unsigned integer (machine dependent size and byte order - always 32 bit) 
                         case 'l': // signed long (always 32 bit, machine byte order) 
-                        case 'L': // unsigned long (always 32 bit, machine byte order) 
                             item = (PhpValue)BitConverter.ToInt32(buffer, pos);
                             break;
 
+                        case 'I': // unsigned integer (machine dependent size and byte order - always 32 bit) 
+                        case 'L': // unsigned long (always 32 bit, machine byte order) 
+                            item = (PhpValue)BitConverter.ToUInt32(buffer, pos);
+                            break;
+
                         case 'N': // unsigned long (always 32 bit, big endian byte order) 
-                            item = (PhpValue)unchecked(((int)buffer[pos] << 24) + (buffer[pos + 1] << 16) + (buffer[pos + 2] << 8) + buffer[pos + 3]);
+                            item = (PhpValue)unchecked(((uint)buffer[pos] << 24) + (buffer[pos + 1] << 16) + (buffer[pos + 2] << 8) + buffer[pos + 3]);
                             break;
 
                         case 'V': // unsigned long (always 32 bit, little endian byte order) 

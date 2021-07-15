@@ -443,13 +443,13 @@ namespace Pchp.Library.Streams
             this.Options = accessOptions;
 
             // Allocate the text conversion filters for this stream.
-            if ((accessOptions & StreamAccessOptions.UseText) > 0)
+            if ((accessOptions & StreamAccessOptions.UseText) != 0)
             {
-                if ((accessOptions & StreamAccessOptions.Read) > 0)
+                if ((accessOptions & StreamAccessOptions.Read) != 0)
                 {
                     textReadFilter = new TextReadFilter();
                 }
-                if ((accessOptions & StreamAccessOptions.Write) > 0)
+                if ((accessOptions & StreamAccessOptions.Write) != 0)
                 {
                     textWriteFilter = new TextWriteFilter();
                 }
@@ -2288,7 +2288,7 @@ namespace Pchp.Library.Streams
         /// </summary>
         public bool CanWrite
         {
-            get { return (Options & StreamAccessOptions.Write) > 0; }
+            get { return (Options & StreamAccessOptions.Write) != 0; }
         }
 
         /// <summary>
@@ -2296,7 +2296,7 @@ namespace Pchp.Library.Streams
         /// </summary>
         public bool CanRead
         {
-            get { return (Options & StreamAccessOptions.Read) > 0; }
+            get { return (Options & StreamAccessOptions.Read) != 0; }
         }
 
         /// <summary>
@@ -2304,7 +2304,7 @@ namespace Pchp.Library.Streams
         /// </summary>
         public bool IsText
         {
-            get { return (Options & StreamAccessOptions.UseText) > 0; }
+            get { return (Options & StreamAccessOptions.UseText) != 0; }
         }
 
         /// <summary>
@@ -2409,9 +2409,10 @@ namespace Pchp.Library.Streams
         {
             if (Wrapper != null)
             {
-                var root = _encoding is Context ctx ? ctx.RootPath : null;
+                FlushWriteBuffer();
 
-                return Wrapper.Stat(root, OpenedPath, StreamStatOptions.Empty, StreamContext.Default, true);
+                var root = _encoding is Context ctx ? ctx.RootPath : null;
+                return Wrapper.Stat(root, OpenedPath, StreamStatOptions.Empty, Context, this);
             }
 
             return StreamWrapper.StatUnsupported();

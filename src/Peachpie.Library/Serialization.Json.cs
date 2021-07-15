@@ -209,6 +209,17 @@ namespace Pchp.Library
 
                 #endregion
 
+                /// <summary>
+                /// Binary strings passed to json_encode are required to be in UTF-8, we can enforce it using this special encoding instance.
+                /// </summary>
+                private static readonly Encoding Utf8CheckedEncoding =
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+                /// <summary>
+                /// An invariant number format to be used.
+                /// </summary>
+                static System.Globalization.NumberFormatInfo NumberFormatInfo => Context.InvariantNumberFormatInfo;
+
                 //Encoding Encoding => _ctx.StringEncoding;
 
                 StackHelper _recursion;
@@ -324,9 +335,16 @@ namespace Pchp.Library
                 {
                     var str = StringBuilderUtilities.Pool.Get();
 
-                    variable.Accept(new ObjectWriter(ctx, str, encodeOptions, caller, depth));
+                    try
+                    {
+                        variable.Accept(new ObjectWriter(ctx, str, encodeOptions, caller, depth));
 
-                    return StringBuilderUtilities.GetStringAndReturn(str);
+                        return str.ToString();
+                    }
+                    finally
+                    {
+                        StringBuilderUtilities.Pool.Return(str);
+                    }
                 }
 
                 /// <summary>
@@ -336,7 +354,7 @@ namespace Pchp.Library
                 /// <param name="message">Error message.</param>
                 void HandleError(JsonError code, string message)
                 {
-                    if (PartialOutputOnError || !ThrowOnError)
+                    if (PartialOutputOnError)
                     {
                         SetLastJsonError(_ctx/*, message*/, (int)code);
                     }
@@ -381,7 +399,7 @@ namespace Pchp.Library
 
                 public override void Accept(long obj)
                 {
-                    WriteRaw(obj.ToString());
+                    WriteRaw(obj.ToString(NumberFormatInfo));
                 }
 
                 public override void Accept(string obj)
@@ -391,8 +409,16 @@ namespace Pchp.Library
 
                 public override void Accept(PhpString obj)
                 {
-                    // TODO: escape single-byte characters properly
-                    WriteString(obj.ToString(_ctx));
+                    try
+                    {
+                        // TODO: escape single-byte characters properly
+                        WriteString(obj.ToString(Utf8CheckedEncoding));
+                    }
+                    catch (DecoderFallbackException)
+                    {
+                        HandleError(JsonError.Utf8, Resources.LibResources.serialization_json_utf8_error);
+                        WriteNull();
+                    }
                 }
 
                 public override void Accept(double obj)
@@ -401,7 +427,7 @@ namespace Pchp.Library
 
                     if (HasPreserveZeroFraction && aslong == obj)
                     {
-                        WriteRaw(aslong.ToString());
+                        WriteRaw(aslong.ToString(NumberFormatInfo));
                         WriteRaw(".0"); // as PHP does
                     }
                     else if (double.IsNaN(obj) || double.IsInfinity(obj))
@@ -413,7 +439,7 @@ namespace Pchp.Library
                     {
                         // "G" format specifier,
                         // does not append floating point if .0
-                        WriteRaw(obj.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                        WriteRaw(obj.ToString(NumberFormatInfo));
                     }
                 }
 
@@ -666,8 +692,8 @@ namespace Pchp.Library
                         var result = Core.Convert.StringToNumber(value, out l, out d);
                         if ((result & Core.Convert.NumberInfo.IsNumber) != 0)
                         {
-                            if ((result & Core.Convert.NumberInfo.LongInteger) != 0) WriteRaw(l.ToString());
-                            if ((result & Core.Convert.NumberInfo.Double) != 0) WriteRaw(d.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                            if ((result & Core.Convert.NumberInfo.LongInteger) != 0) WriteRaw(l.ToString(NumberFormatInfo));
+                            if ((result & Core.Convert.NumberInfo.Double) != 0) WriteRaw(d.ToString(NumberFormatInfo));
                             return;
                         }
                     }
@@ -1305,6 +1331,7 @@ namespace Pchp.Library
         /// All string data must be UTF-8 encoded.</param>
         /// <param name="options"></param>
         /// <param name="depth">Set the maximum depth. Must be greater than zero.</param>
+        [return: CastToFalse]
         public static string json_encode(Context ctx, PhpValue value, JsonEncodeOptions options = JsonEncodeOptions.Default, long depth = 512)
         {
             // TODO: depth
@@ -1313,20 +1340,20 @@ namespace Pchp.Library
 
             //return new PhpSerialization.JsonSerializer(encodeOptions: options).Serialize(ctx, value, default);
 
-            //try
+            try
             {
                 return PhpSerialization.JsonSerializer.ObjectWriter.Serialize(ctx, value, options, default, depth);
             }
-            //catch (JsonException jsonex)
-            //{
-            //    if ((options & JsonEncodeOptions.JSON_THROW_ON_ERROR) != 0)
-            //    {
-            //        throw;
-            //    }
+            catch (JsonException jsonex)
+            {
+                if ((options & JsonEncodeOptions.JSON_THROW_ON_ERROR) != 0)
+                {
+                    throw;
+                }
 
-            //    PhpSerialization.SetLastJsonError(ctx, jsonex.getCode());
-            //    return null;
-            //}
+                PhpSerialization.SetLastJsonError(ctx, jsonex.getCode());
+                return null;
+            }
         }
 
         /// <summary>

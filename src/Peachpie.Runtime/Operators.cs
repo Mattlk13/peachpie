@@ -239,6 +239,31 @@ namespace Pchp.Core
             target.Value = value;
         }
 
+        /// <summary>
+        /// "unset" operator.
+        /// </summary>
+        public static void UnsetValue(ref PhpValue target)
+        {
+            if (target.Object is PhpAlias alias)
+            {
+                alias.ReleaseRef();
+            }
+
+            target = default;
+        }
+
+        /// <summary>
+        /// "unset" operator.
+        /// </summary>
+        public static void UnsetValue(ref PhpAlias target)
+        {
+            if (target != null)
+            {
+                target.ReleaseRef();
+                target = PhpAlias.Create(default);
+            }
+        }
+
         #endregion
 
         #region Ensure
@@ -569,11 +594,12 @@ namespace Pchp.Core
             // IList
             if (obj is IList) return new ListAsPhpArray((IList)obj);
 
-            // TODO: IDictionary
 
             // get_Item
             if (obj.GetPhpTypeInfo().RuntimeMethods[TypeMethods.MagicMethods.get_item] != null)
             {
+                // IDictionary,
+                // and item getters in general:
                 return new GetSetItemAsPhpArray(obj);
             }
 
@@ -872,11 +898,13 @@ namespace Pchp.Core
                 return PhpValue.Null;
             }
 
-            // TODO: IDictionary
 
             // get_Item
             if (obj != null)
             {
+                // IDictionary
+                // and item getter in general:
+
                 var getter = obj.GetPhpTypeInfo().RuntimeMethods[TypeMethods.MagicMethods.get_item];
                 if (getter != null)
                 {
@@ -1030,19 +1058,41 @@ namespace Pchp.Core
 
         public static bool offsetExists(object obj, PhpValue index)
         {
-            if (obj is ArrayAccess arrrayAccess)
+            return obj switch
             {
-                return arrrayAccess.offsetExists(index);
-            }
-            else if (obj is IPhpArray arr)
+                // PHP ArrayAccess
+                ArrayAccess arrrayAccess => arrrayAccess.offsetExists(index),
+
+                // object implementing PeachPie's IPhpArray
+                IPhpArray arr => IsSet(arr.GetItemValue(index)),
+
+                // IList, checks the integer key is in range
+                IList list => index.TryToIntStringKey(out var key) && key.IsInteger && key.Integer >= 0 && key.Integer < list.Count,
+
+                // IDictionary
+                IDictionary dict => offsetExists(dict, index),
+
+                // TODO: generic get_Item() getter
+                _ => false,
+            };
+        }
+
+        public static bool offsetExists(IDictionary obj, PhpValue index)
+        {
+            if (obj != null)
             {
-                return IsSet(arr.GetItemValue(index));
+                // return obj.Contains(index.ToClr()); // <-- cannot be used, index might need to be converted to specific Dictionary's TKey type
+
+                var getter = obj.GetPhpTypeInfo().RuntimeMethods[/*nameof(IDictionary<,>.ContainsKey)*/"ContainsKey"];
+                if (getter != null)
+                {
+                    return getter.Invoke(null, obj, index).ToBoolean();
+                }
+
+                // fallback to generic behavior,
+                // might get false if index is of a wrong type
+                return obj.Contains(index.ToClr());
             }
-            else if (obj is IList list)
-            {
-                return index.TryToIntStringKey(out var key) && key.IsInteger && key.Integer >= 0 && key.Integer < list.Count;
-            }
-            // TODO: IDictionary
 
             return false;
         }
@@ -1469,6 +1519,7 @@ namespace Pchp.Core
 
                 // special cases before using reflection
                 if (enumerable is IEnumerable<(PhpValue, PhpValue)> valval) return new ValueTupleEnumerator<PhpValue, PhpValue>(valval);
+                if (enumerable is IEnumerable<PhpValue> val) return new PhpValueEnumerator(val.GetEnumerator());
                 if (enumerable is IDictionary) return new DictionaryEnumerator(((IDictionary)enumerable).GetEnumerator());
                 if (enumerable is IEnumerable<KeyValuePair<object, object>> kv) return new KeyValueEnumerator<object, object>(kv);
                 if (enumerable is IEnumerable<object>) return new EnumerableEnumerator(enumerable.GetEnumerator());
@@ -1605,6 +1656,43 @@ namespace Pchp.Core
             }
 
             /// <summary>
+            /// Enumerator of <see cref="IEnumerable{PhpValue}"/>.
+            /// </summary>
+            sealed class PhpValueEnumerator : ClrEnumerator
+            {
+                readonly IEnumerator<PhpValue> _enumerator;
+
+                protected override IEnumerator Enumerator => _enumerator;
+
+                long _key;
+
+                public override bool MoveFirst()
+                {
+                    _key = -1;
+                    return base.MoveFirst();
+                }
+
+                public override bool MoveNext()
+                {
+                    _key++;
+                    return base.MoveNext();
+                }
+
+                protected override void FetchCurrent(ref PhpValue key, ref PhpValue value)
+                {
+                    key = _key;
+                    value = _enumerator.Current;
+                }
+
+                public PhpValueEnumerator(IEnumerator<PhpValue> enumerator)
+                {
+                    Debug.Assert(enumerator != null);
+                    _enumerator = enumerator;
+                    _key = -1;
+                }
+            }
+
+            /// <summary>
             /// Enumerator of <see cref="IDictionary"/>
             /// </summary>
             sealed class DictionaryEnumerator : ClrEnumerator
@@ -1686,9 +1774,9 @@ namespace Pchp.Core
         {
             Debug.Assert(obj != null);
 
-            if (obj is Iterator)
+            if (obj is Iterator it)
             {
-                return GetForeachEnumerator((Iterator)obj);
+                return GetForeachEnumerator(it);
             }
             else if (obj is IteratorAggregate)
             {
@@ -1725,6 +1813,8 @@ namespace Pchp.Core
             }
             else
             {
+                // TODO: GetEnumerator() method?
+
                 // PHP property enumeration
                 return new PhpFieldsEnumerator(obj, caller);
             }
@@ -2301,6 +2391,43 @@ namespace Pchp.Core
 
             return PhpCallback.CreateInvalid();
         }
+
+        #endregion
+
+        #region Echo
+
+        /// <summary>Echoes the value into the output.</summary>
+        public static void Echo(object value, Context ctx) => ctx.Echo(value);
+
+        /// <summary>Echoes the value into the output.</summary>
+        public static void Echo(string value, Context ctx) => ctx.Echo(value);
+
+        /// <summary>Echoes the value into the output.</summary>
+        public static void Echo(PhpString value, Context ctx) => ctx.Echo(value);
+
+        /// <summary>Echoes the value into the output.</summary>
+        public static void Echo(byte[] value, Context ctx) => ctx.Echo(value); // TODO: NETSTANDARD2.1 // ReadOnlySpan<byte>
+
+        /// <summary>Echoes the value into the output.</summary>
+        public static void Echo(PhpNumber value, Context ctx) => ctx.Echo(value);
+
+        /// <summary>Echoes the value into the output.</summary>
+        public static void Echo(PhpValue value, Context ctx) => ctx.Echo(value);
+
+        /// <summary>Echoes the value into the output.</summary>
+        public static void Echo(PhpAlias value, Context ctx) => ctx.Echo(value.Value);
+
+        /// <summary>Echoes the value into the output.</summary>
+        public static void Echo(double value, Context ctx) => ctx.Echo(value);
+
+        /// <summary>Echoes the value into the output.</summary>
+        public static void Echo(long value, Context ctx) => ctx.Echo(value);
+
+        /// <summary>Echoes the value into the output.</summary>
+        public static void Echo(int value, Context ctx) => ctx.Echo(value);
+
+        /// <summary>Echoes the value into the output.</summary>
+        public static void Echo(bool value, Context ctx) => ctx.Echo(value);
 
         #endregion
     }

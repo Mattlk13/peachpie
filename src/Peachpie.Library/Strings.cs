@@ -676,31 +676,22 @@ namespace Pchp.Library
         #region explode, implode
 
         /// <summary>
-        /// Splits a string by string separators.
-        /// </summary>
-        /// <param name="separator">The substrings separator. Must not be empty.</param>
-        /// <param name="str">The string to be split.</param>
-        /// <returns>The array of strings.</returns>
-        [return: CastToFalse]
-        public static PhpArray explode(string separator, string str) => explode(separator, str, int.MaxValue);
-
-        /// <summary>
         /// Splits a string by string separators with limited resulting array size.
         /// </summary>
         /// <param name="separator">The substrings separator. Must not be empty.</param>
-        /// <param name="str">The string to be split.</param>
+        /// <param name="string">The string to be split.</param>
         /// <param name="limit">
         /// The maximum number of elements in the resultant array. Zero value is treated in the same way as 1.
         /// If negative, then the number of separators found in the string + 1 is added to the limit.
         /// </param>
         /// <returns>The array of strings.</returns>
         /// <remarks>
-        /// If <paramref name="str"/> is empty an array consisting of exacty one empty string is returned.
+        /// If <paramref name="string"/> is empty an array consisting of exactly one empty string is returned.
         /// If <paramref name="limit"/> is zero
         /// </remarks>
         /// <exception cref="PhpException">Thrown if the <paramref name="separator"/> is null or empty or if <paramref name="limit"/>is not positive nor -1.</exception>
         [return: CastToFalse]
-        public static PhpArray explode(string separator, string str, int limit)
+        public static PhpArray explode(string separator, string @string, int limit = int.MaxValue)
         {
             // validate parameters:
             if (string.IsNullOrEmpty(separator))
@@ -710,14 +701,14 @@ namespace Pchp.Library
                 throw new ArgumentException();
             }
 
-            if (str == null) str = String.Empty;
+            @string ??= string.Empty;
 
             bool last_part_is_the_rest = limit >= 0;
 
             if (limit == 0)
                 limit = 1;
             else if (limit < 0)
-                limit += SubstringCountInternal(str, separator, 0, str.Length) + 2;
+                limit += SubstringCountInternal(@string, separator, 0, @string.Length) + 2;
 
             // splits <str> by <separator>:
             int sep_len = separator.Length;
@@ -729,18 +720,18 @@ namespace Pchp.Library
 
             while (--limit > 0)
             {
-                pos = compareInfo.IndexOf(str, separator, i, str.Length - i, System.Globalization.CompareOptions.Ordinal);
+                pos = compareInfo.IndexOf(@string, separator, i, @string.Length - i, System.Globalization.CompareOptions.Ordinal);
 
                 if (pos < 0) break; // not found
 
-                result.AddValue(PhpValue.Create(str.Substring(i, pos - i))); // faster than Add()
+                result.AddValue(PhpValue.Create(@string.Substring(i, pos - i))); // faster than Add()
                 i = pos + sep_len;
             }
 
             // Adds last chunk. If separator ends the string, it will add empty string (as PHP do).
-            if (i <= str.Length && last_part_is_the_rest)
+            if (i <= @string.Length && last_part_is_the_rest)
             {
-                result.AddValue(PhpValue.Create(str.Substring(i)));
+                result.AddValue(PhpValue.Create(@string.Substring(i)));
             }
 
             return result;
@@ -846,7 +837,7 @@ namespace Pchp.Library
             bool not_first = false;                       // not the first iteration
 
             var glue_element = Streams.TextElement.FromValue(ctx, glue);    // convert it once
-            var result = new PhpString.Blob();
+            var result = new PhpString.Blob(pieces.Count * 2 - 1);
 
             var x = pieces.GetFastEnumerator();
             while (x.MoveNext())
@@ -1068,13 +1059,8 @@ namespace Pchp.Library
         /// <remarks>If <paramref name="count"/> is set to 0, the function will return <b>null</b> reference.</remarks>   
         /// <exception cref="PhpException">Thrown if <paramref name="count"/> is negative.</exception>
         //[PureFunction]
-        public static string str_repeat(string str, int count)
+        public static PhpString str_repeat(PhpString str, int count)
         {
-            if (str == null)
-            {
-                return string.Empty;
-            }
-
             if (count <= 0)
             {
                 if (count == 0)
@@ -1082,25 +1068,32 @@ namespace Pchp.Library
                     return string.Empty;
                 }
 
+                throw new Spl.ValueError(LibResources.number_of_repetitions_negative); // as of PHP8
                 //PhpException.Throw(PhpError.Warning, LibResources.GetString("number_of_repetitions_negative"));
                 //return null;
-                throw new ArgumentException();
             }
 
-            //PhpBytes binstr = str as PhpBytes;
-            //if (binstr != null)
-            //{
-            //    byte[] result = new byte[binstr.Length * count];
-
-            //    for (int i = 0; i < count; i++) Buffer.BlockCopy(binstr.ReadonlyData, 0, result, binstr.Length * i, binstr.Length);
-
-            //    return new PhpBytes(result);
-            //}
-
-            var unistr = str; // Core.Convert.ObjectToString(str);
-            if (unistr != null)
+            if (str.IsEmpty)
             {
+                return PhpString.Empty;
+            }
+
+            if (str.ContainsBinaryData)
+            {
+                var blob = new PhpString.Blob(count);
+
+                while (count-- > 0)
+                {
+                    blob.Append(str);
+                }
+
+                return new PhpString(blob);
+            }
+            else
+            {
+                var unistr = str.ToString(Encoding.UTF8/*does not matter*/);
                 var result = StringBuilderUtilities.Pool.Get(); // new StringBuilder(count * unistr.Length);
+
                 while (count-- > 0)
                 {
                     result.Append(unistr);
@@ -1108,8 +1101,6 @@ namespace Pchp.Library
 
                 return StringBuilderUtilities.GetStringAndReturn(result);
             }
-
-            return null;
         }
 
         #endregion
@@ -1607,59 +1598,62 @@ namespace Pchp.Library
             return newstr.ToString();
         }
 
-        /// <summary>
-        /// Converts a string to an array.
-        /// </summary>
-        /// <param name="str">The string to split.</param>
-        /// <returns>An array with keys being character indeces and values being characters.</returns>
-        public static PhpArray str_split(string str)
-        {
-            if (string.IsNullOrEmpty(str))
-            {
-                // seems like an incosistency, but in PHP they really return this for an empty string:
-                return new PhpArray(1) { string.Empty }; // array(1){ [0] => "" }
-            }
-            else
-            {
-                return Split(str, splitLength: 1);
-            }
-        }
+        ///// <summary>
+        ///// Converts a string to an array.
+        ///// </summary>
+        ///// <param name="str">The string to split.</param>
+        ///// <returns>An array with keys being character indexes and values being characters.</returns>
+        //public static PhpArray str_split(string str)
+        //{
+        //    if (string.IsNullOrEmpty(str))
+        //    {
+        //        // seems like an inconsistency, but in PHP they really return this for an empty string:
+        //        return new PhpArray(1) { string.Empty }; // array(1){ [0] => "" }
+        //    }
+        //    else
+        //    {
+        //        return Split(str, splitLength: 1);
+        //    }
+        //}
 
         /// <summary>
         /// Converts a string to an array.
         /// </summary>
         /// <param name="ctx">Current context. Cannot be <c>null</c>.</param>
-        /// <param name="str">The string to split.</param>
-        /// <param name="splitLength">Length of chunks <paramref name="str"/> should be split into.</param>
-        /// <returns>An array with keys being chunk indeces and values being chunks of <paramref name="splitLength"/>
+        /// <param name="string">The string to split.</param>
+        /// <param name="length">Length of chunks <paramref name="string"/> should be split into.</param>
+        /// <returns>An array with keys being chunk indexes and values being chunks of <paramref name="length"/>
         /// length.</returns>
-        /// <exception cref="PhpException">The <paramref name="splitLength"/> parameter is not positive (Warning).</exception>
+        /// <exception cref="PhpException">The <paramref name="length"/> parameter is not positive (Warning).</exception>
         // [return: CastToFalse]
-        public static PhpArray str_split(Context ctx, PhpString str, int splitLength)
+        public static PhpArray str_split(Context ctx, PhpString @string, int length = 1)
         {
-            if (splitLength < 1)
+            if (length < 1)
             {
-                throw new ArgumentOutOfRangeException(); // we throw instead of returning FALSE so we don't need [CastToFalse]
-                //PhpException.Throw(PhpError.Warning, LibResources.GetString("segment_length_not_positive"));
+                PhpException.Throw(PhpError.Warning, LibResources.segment_length_not_positive);
+
+                // we throw instead of returning FALSE so we don't need [CastToFalse]
+                throw new ArgumentOutOfRangeException(nameof(length), LibResources.segment_length_not_positive);
+
                 //return null; // FALSE
             }
-            if (str.IsEmpty)
+            if (@string.IsEmpty)
             {
-                // seems like an incosistency, but in PHP they really return this for an empty string:
+                // seems like an inconsistency, but in PHP they really return this for an empty string:
                 return new PhpArray(1) { string.Empty }; // array(1){ [0] => "" }
             }
 
-            if (str.ContainsBinaryData)
+            if (@string.ContainsBinaryData)
             {
-                return Split(str.ToBytes(ctx), splitLength);
+                return Split(@string.ToBytes(ctx), length);
             }
             else
             {
-                return Split(str.ToString(ctx), splitLength);
+                return Split(@string.ToString(ctx), length);
             }
         }
 
-        internal static PhpArray Split(string str, int splitLength)
+        internal static PhpArray Split(string str, int splitLength = 1)
         {
             int length = str.Length;
             PhpArray result = new PhpArray(length / splitLength + 1);
@@ -1677,7 +1671,7 @@ namespace Pchp.Library
             return result;
         }
 
-        internal static PhpArray Split(byte[] str, int splitLength)
+        internal static PhpArray Split(byte[] str, int splitLength = 1)
         {
             int length = str.Length;
             PhpArray result = new PhpArray(length / splitLength + 1);
@@ -1943,7 +1937,7 @@ namespace Pchp.Library
 
             const string cslashed_chars = "abtnvfr";
 
-            StringBuilder result = new StringBuilder();
+            var result = StringBuilderUtilities.Pool.Get();
             for (int i = 0; i < str.Length; i++)
             {
                 //char c = translatedStr[i];
@@ -1969,7 +1963,7 @@ namespace Pchp.Library
                     result.Append(str[i]);
             }
 
-            return result.ToString();
+            return StringBuilderUtilities.GetStringAndReturn(result);
         }
 
         /// <summary>
@@ -3789,14 +3783,20 @@ namespace Pchp.Library
         /// <remarks>Assumes that either <paramref name="format"/> nor <paramref name="arguments"/> is null.</remarks>
         internal static string FormatInternal(Context ctx, string format, PhpValue[] arguments)
         {
-            Debug.Assert(format != null && arguments != null);
+            Debug.Assert(arguments != null);
 
-            Encoding encoding = ctx.StringEncoding;
-            var result = StringBuilderUtilities.Pool.Get();
+            if (string.IsNullOrEmpty(format))
+            {
+                return string.Empty;
+            }
+
+            var encoding = ctx.StringEncoding;
             int state = 0, width = 0, precision = -1, seqIndex = 0, swapIndex = -1;
             bool leftAlign = false;
             bool plusSign = false;
             char padChar = ' ';
+
+            var result = StringBuilderUtilities.Pool.Get();
 
             // process the format string using a 6-state finite automaton
             int length = format.Length;
@@ -3932,16 +3932,29 @@ namespace Pchp.Library
 
                                 case 'd': // treat as integer, present as signed decimal number
                                     {
-                                        // use long to prevent overflow in Math.Abs:
                                         long ivalue = obj.ToLong();
-                                        if (ivalue < 0) sign = '-'; else if (ivalue >= 0 && plusSign) sign = '+';
+                                        if (ivalue < 0)
+                                        {
+                                            sign = '-';
 
-                                        app = Math.Abs((long)ivalue).ToString();
+                                            // deal with Int64.MinValue efficiently
+                                            app = ((ulong)unchecked(-ivalue)).ToString(Context.InvariantNumberFormatInfo);
+                                        }
+                                        else
+                                        {
+                                            if (ivalue >= 0 && plusSign)
+                                            {
+                                                sign = '+';
+                                            }
+
+                                            app = Core.Convert.ToString(ivalue);
+                                        }
+
                                         break;
                                     }
 
                                 case 'u': // treat as integer, present as unsigned decimal number, without sign
-                                    app = unchecked((uint)obj.ToLong()).ToString();
+                                    app = Core.Convert.ToString(unchecked((uint)obj.ToLong()));
                                     break;
 
                                 case 'e':
@@ -3950,7 +3963,7 @@ namespace Pchp.Library
                                         if (dvalue < 0) sign = '-'; else if (dvalue >= 0 && plusSign) sign = '+';
 
                                         string f = string.Concat("0.", new string('0', precision == -1 ? printfFloatPrecision : precision), "e+0");
-                                        app = Math.Abs(dvalue).ToString(f, ctx.NumberFormat);
+                                        app = Math.Abs(dvalue).ToString(f, Context.InvariantNumberFormatInfo);
                                         break;
                                     }
 
@@ -4037,7 +4050,7 @@ namespace Pchp.Library
         /// See <A href="http://www.php.net/manual/en/function.sprintf.php">PHP manual</A> for details.
         /// Besides, a type specifier "%C" is applicable. It converts an integer value to Unicode character.</param>
         /// <returns>The formatted string.</returns>
-        /// <exception cref="PhpException">Thrown when there is less arguments than expeceted by formatting string.</exception>
+        /// <exception cref="PhpException">Thrown when there is less arguments than expected by formatting string.</exception>
         [return: CastToFalse]
         public static string sprintf(Context ctx, string format, params PhpValue[] arguments)
         {
@@ -4055,8 +4068,9 @@ namespace Pchp.Library
             }
             else
             {
-                PhpException.Throw(PhpError.Warning, LibResources.too_few_arguments);
-                return null;    // FALSE
+                //PhpException.Throw(PhpError.Warning, LibResources.too_few_arguments);
+                //return null;    // FALSE
+                throw new Spl.ArgumentCountError();
             }
         }
 
@@ -4066,7 +4080,7 @@ namespace Pchp.Library
         /// <param name="ctx">Current runtime context.</param>
         /// <param name="format">The format string. For details, see PHP manual.</param>
         /// <param name="arguments">The arguments.</param>
-        /// <returns>The formatted string on success, or <c>false</c> if there is less arguments than expeceted by formatting string.</returns>
+        /// <returns>The formatted string on success, or <c>false</c> if there is less arguments than expected by formatting string.</returns>
         [return: CastToFalse]
         public static string vsprintf(Context ctx, string format, PhpArray arguments)
         {
@@ -4530,7 +4544,7 @@ namespace Pchp.Library
                 if (ch == @break[0] && str.AsSpan(i).StartsWith(@break.AsSpan()))
                 {
                     result.Append(str, linestart, i - linestart + @break.Length);
-                    
+
                     lastspace = linestart = i + @break.Length;
                     i = linestart - 1; // ++
                 }
@@ -4813,7 +4827,7 @@ namespace Pchp.Library
         /// Converts logical Hebrew text to visual text.
         /// </summary>
         /// <param name="str">The string to convert.</param>
-        /// <returns>The comverted string.</returns>
+        /// <returns>The converted string.</returns>
         /// <remarks>Although PHP returns false if <paramref name="str"/> is null or empty there is no reason to do so.</remarks>
         public static string hebrev(string str)
         {
@@ -4825,7 +4839,7 @@ namespace Pchp.Library
         /// </summary>
         /// <param name="str">The string to convert.</param>
         /// <param name="maxCharactersPerLine">Maximum number of characters per line.</param>
-        /// <returns>The comverted string.</returns>
+        /// <returns>The converted string.</returns>
         /// <remarks>Although PHP returns false if <paramref name="str"/> is null or empty there is no reason to do so.</remarks>
         public static string hebrev(string str, int maxCharactersPerLine)
         {
@@ -4848,7 +4862,7 @@ namespace Pchp.Library
         /// </summary>
         /// <param name="str">The string to convert.</param>
         /// <param name="maxCharactersPerLine">Maximum number of characters per line.</param>
-        /// <returns>The comverted string.</returns>
+        /// <returns>The converted string.</returns>
         /// <remarks>Although PHP returns false if <paramref name="str"/> is null or empty there is no reason to do so.</remarks>
         public static string hebrevc(string str, int maxCharactersPerLine)
         {

@@ -38,17 +38,13 @@ namespace Pchp.CodeAnalysis.Semantics
     {
         internal override void Emit(CodeGenerator cg)
         {
-            if (Expression.IsConstant() == false)
+            if (Expression.IsConstant())
             {
-                cg.EmitSequencePoint(this.PhpSyntax);
-                cg.EmitPop(Expression.Emit(cg));
-                
-                //
-                if (cg.EmitPdbSequencePoints)
-                {
-                    cg.Builder.EmitOpCode(ILOpCode.Nop);
-                }
+                return;
             }
+
+            cg.EmitSequencePoint(this.PhpSyntax);
+            cg.EmitPop(Expression.Emit(cg));
         }
     }
 
@@ -287,6 +283,8 @@ namespace Pchp.CodeAnalysis.Semantics
 
             var lhs = place.EmitStorePreamble(cg, BoundAccess.Unset);
             place.EmitStore(cg, ref lhs, null, BoundAccess.Unset); // null type -> no value
+
+            lhs.Dispose();
         }
     }
 

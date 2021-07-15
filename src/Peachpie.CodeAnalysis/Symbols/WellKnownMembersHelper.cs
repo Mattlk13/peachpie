@@ -12,7 +12,7 @@ namespace Pchp.CodeAnalysis.Symbols
 {
     static class WellKnownMembersHelper
     {
-        public static AttributeData CreateCompilerGeneratedAttribute(this PhpCompilation compilation)
+        public static SynthesizedAttributeData CreateCompilerGeneratedAttribute(this PhpCompilation compilation)
         {
             // [CompilerGenerated]
             var compilergenerated = (MethodSymbol)compilation.GetWellKnownTypeMember(WellKnownMember.System_Runtime_CompilerServices_CompilerGeneratedAttribute__ctor);
@@ -35,6 +35,21 @@ namespace Pchp.CodeAnalysis.Symbols
                         compilation.CreateTypedConstant(deprecated.Version/*NOTE:Version contains the message*/),
                         compilation.CreateTypedConstant(false/*isError*/)),
                     ImmutableArray<KeyValuePair<string, TypedConstant>>.Empty);
+        }
+
+        public static AttributeData TryCreateDoesNotReturnAttribute(this PhpCompilation compilation)
+        {
+            var attr = compilation.GetTypeByMetadataName("System.Diagnostics.CodeAnalysis.DoesNotReturnAttribute");
+            if (attr == null)
+            {
+                return null;
+            }
+
+            // [DoesNotReturnAttribute()]
+            return new SynthesizedAttributeData(
+                (MethodSymbol)attr.InstanceConstructors.Single(),
+                ImmutableArray<TypedConstant>.Empty,
+                ImmutableArray<KeyValuePair<string, TypedConstant>>.Empty);
         }
 
         public static AttributeData CreateParamsAttribute(this PhpCompilation compilation)

@@ -200,7 +200,7 @@ namespace Pchp.CodeAnalysis
         /// <summary>
         /// Merges CLR type to be nullable.
         /// </summary>
-        internal TypeSymbol MergeNull(TypeSymbol type)
+        internal TypeSymbol MergeNull(TypeSymbol type, bool asSystemNullable)
         {
             if (type == null || type.IsVoid())
             {
@@ -209,7 +209,20 @@ namespace Pchp.CodeAnalysis
 
             if (type.IsValueType || type.IsOfType(CoreTypes.IPhpArray)) // TODO: remove IPhpArray and check for null in emitted code
             {
-                return CoreTypes.PhpValue;    // Nullable bool|long|double -> PhpValue
+                if (asSystemNullable)
+                {
+                    // nullable bool|int|long|double|string
+                    if (type.SpecialType == SpecialType.System_Boolean ||
+                        type.SpecialType == SpecialType.System_Int32 ||
+                        type.SpecialType == SpecialType.System_Int64 ||
+                        type.SpecialType == SpecialType.System_Double ||
+                        type.Is_PhpString())
+                    {
+                        return this.GetSpecialType(SpecialType.System_Nullable_T).Construct(ImmutableArray.Create(type));
+                    }
+                }
+
+                return CoreTypes.PhpValue;    // anything else -> PhpValue
             }
 
             return type;
@@ -284,22 +297,23 @@ namespace Pchp.CodeAnalysis
         /// <param name="selfHint">Optional.
         /// Current type scope for better <paramref name="tref"/> resolution since <paramref name="tref"/> might be ambiguous</param>
         /// <param name="nullable">Whether the resulting type must be able to contain NULL. Default is <c>false</c>.</param>
+        /// <param name="phpLang">PHP semantic - specifies how to treat <c>int</c> and <c>string</c> special types.</param>
         /// <returns>Resolved symbol.</returns>
-        internal TypeSymbol GetTypeFromTypeRef(AST.TypeRef tref, SourceTypeSymbol selfHint = null, bool nullable = false)
+        internal TypeSymbol GetTypeFromTypeRef(AST.TypeRef tref, SourceTypeSymbol selfHint = null, bool nullable = false, bool phpLang = false)
         {
             if (tref == null)
             {
                 return null;
             }
 
-            var t = this.TypeRefFactory.CreateFromTypeRef(tref, null, selfHint);
+            var t = this.TypeRefFactory.CreateFromTypeRef(tref, self: selfHint, phpLang: phpLang);
 
             var symbol = t.ResolveRuntimeType(this);
 
             if (t.IsNullable || nullable)
             {
-                // TODO: for value types -> Nullable<T>
-                symbol = MergeNull(symbol);
+                // TODO: asSystemNullable: true // to generate strongly typed function signatures
+                symbol = MergeNull(symbol, asSystemNullable: false);
             }
 
             return symbol;
@@ -338,6 +352,38 @@ namespace Pchp.CodeAnalysis
             {
                 throw new ArgumentException();
             }
+        }
+
+        internal MethodSymbol Construct_System_Nullable_T_HasValue(TypeSymbol t)
+        {
+            var nullable_t = GetSpecialType(SpecialType.System_Nullable_T);
+            Debug.Assert(nullable_t != null);
+            return System_Nullable_T_HasValue(nullable_t.Construct(ImmutableArray.Create(t)));
+        }
+
+        internal MethodSymbol Construct_System_Nullable_T_GetValueOrDefault(TypeSymbol t)
+        {
+            var nullable_t = GetSpecialType(SpecialType.System_Nullable_T);
+            Debug.Assert(nullable_t != null);
+            return System_Nullable_T_GetValueOrDefault(nullable_t.Construct(ImmutableArray.Create(t)));
+        }
+
+        internal MethodSymbol System_Nullable_T_HasValue(TypeSymbol tNullable)
+        {
+            Debug.Assert(tNullable.IsNullableType());
+            
+            var member = (MethodSymbol)GetSpecialTypeMember(SpecialMember.System_Nullable_T_get_HasValue);
+            Debug.Assert(member != null);
+            return member.AsMember((NamedTypeSymbol)tNullable);
+        }
+
+        internal MethodSymbol System_Nullable_T_GetValueOrDefault(TypeSymbol tNullable)
+        {
+            Debug.Assert(tNullable.IsNullableType());
+
+            var member = (MethodSymbol)GetSpecialTypeMember(SpecialMember.System_Nullable_T_GetValueOrDefault);
+            Debug.Assert(member != null);
+            return member.AsMember((NamedTypeSymbol)tNullable);
         }
 
         #endregion
@@ -693,7 +739,7 @@ namespace Pchp.CodeAnalysis
                     }
                 }
 
-                result = maybenull ? MergeNull(result) : result ?? CoreTypes.Void;
+                result = maybenull ? MergeNull(result, asSystemNullable: false) : result ?? CoreTypes.Void;
 
                 Debug.Assert(result.IsValidType());
 

@@ -52,6 +52,9 @@ namespace Pchp.CodeAnalysis.Semantics
             if (value is bool b && b == false)
                 return true;
 
+            if (value is byte[] bytes && bytes.Length == 0)
+                return true;
+
             return false;
         }
 
@@ -62,5 +65,23 @@ namespace Pchp.CodeAnalysis.Semantics
             !(expr.ConstantValue.HasValue
               || expr is BoundVariableRef varExpr && varExpr.Name.IsDirect
               || expr is BoundLiteral);
+
+        /// <summary>
+        /// Whether a sequence point should be emitted for the given expression statement.
+        /// </summary>
+        public static bool AllowSequencePoint(LangElement element)
+        {
+            if (element != null)
+            {
+                if (element is EchoStmt echo && echo.IsHtmlCode)
+                {
+                    return false;
+                }
+
+                return true;
+            }
+
+            return false;
+        }
     }
 }

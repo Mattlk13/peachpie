@@ -20,8 +20,10 @@ namespace Peachpie.Library.Graphics
     /// </summary>
     internal class PhpGdImageResource : PhpResource
     {
+        const string ResourceTypeName = "gd";
+
         /// <summary>
-        /// Underlaying <see cref="Image"/> object.
+        /// Underlying <see cref="Image"/> object.
         /// Cannot be <c>null</c> reference until it is not disposed.
         /// </summary>
         public TImage/*!*/Image
@@ -66,7 +68,7 @@ namespace Peachpie.Library.Graphics
         //public bool BackgroundAllocated { get; set; }
 
         private PhpGdImageResource()
-            : base("GdImage")
+            : base(ResourceTypeName)
         {
         }
 

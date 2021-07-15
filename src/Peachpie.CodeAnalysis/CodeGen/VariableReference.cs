@@ -137,7 +137,7 @@ namespace Pchp.CodeAnalysis.Semantics
                 {
                     // PhpAlias.EnsureObject() : object
                     place.EmitLoad(cg.Builder).Expect(cg.CoreTypes.PhpAlias);
-                    return cg.EmitCall(ILOpCode.Call, cg.CoreMethods.PhpAlias.EnsureObject).Expect(SpecialType.System_Object);
+                    return cg.EmitCall(ILOpCode.Callvirt, cg.CoreMethods.PhpAlias.EnsureObject).Expect(SpecialType.System_Object);
                 }
                 else if (type == cg.CoreTypes.PhpValue)
                 {
@@ -200,7 +200,7 @@ namespace Pchp.CodeAnalysis.Semantics
                 {
                     // <place>.EnsureArray() : IPhpArray
                     place.EmitLoad(cg.Builder).Expect(cg.CoreTypes.PhpAlias);
-                    return cg.EmitCall(ILOpCode.Call, cg.CoreMethods.PhpAlias.EnsureArray).Expect(cg.CoreTypes.IPhpArray);
+                    return cg.EmitCall(ILOpCode.Callvirt, cg.CoreMethods.PhpAlias.EnsureArray).Expect(cg.CoreTypes.IPhpArray);
                 }
                 else if (type == cg.CoreTypes.PhpValue)
                 {
@@ -288,19 +288,22 @@ namespace Pchp.CodeAnalysis.Semantics
             {
                 // might be ref ? emit address and use SetValue() operator
                 place.EmitLoadAddress(cg.Builder);
-
                 return new LhsStack { Stack = type, StackByRef = true };
             }
             else if (type == cg.CoreTypes.PhpAlias && !access.IsWriteRef && !access.IsUnset)
             {
                 place.EmitLoad(cg.Builder); // : PhpAlias
-
                 return new LhsStack { Stack = type };
+            }
+            else if (access.IsUnset && place.HasAddress && (type.Is_PhpAlias() || type.Is_PhpValue()))
+            {
+                // Template: Operators.UnsetValue(ref ...)
+                place.EmitLoadAddress(cg.Builder);
+                return new LhsStack { Stack = type, StackByRef = true };
             }
             else
             {
                 place.EmitStorePrepare(cg.Builder); // TODO: LhsStack
-
                 return default;
             }
         }
@@ -312,10 +315,28 @@ namespace Pchp.CodeAnalysis.Semantics
             if (access.IsUnset)
             {
                 Debug.Assert(stack == null);
-                Debug.Assert(!lhs.StackByRef);
 
-                stack = cg.EmitLoadDefault(type, 0);
-                place.EmitStore(cg.Builder);
+                if (lhs.StackByRef)
+                {
+                    // Template: Operators.UnsetValue( ref ... )
+                    if (type.Is_PhpValue())
+                    {
+                        cg.EmitCall(ILOpCode.Call, cg.CoreMethods.Operators.UnsetValue_PhpValueRef);
+                    }
+                    else if (type.Is_PhpAlias())
+                    {
+                        cg.EmitCall(ILOpCode.Call, cg.CoreMethods.Operators.UnsetValue_PhpAliasRef);
+                    }
+                    else
+                    {
+                        throw ExceptionUtilities.Unreachable;
+                    }
+                }
+                else
+                {
+                    cg.EmitLoadDefault(type, 0);
+                    place.EmitStore(cg.Builder);
+                }
                 return;
             }
 
@@ -746,8 +767,8 @@ namespace Pchp.CodeAnalysis.Semantics
 
                 if (stack == null) // IsUnset
                 {
-                    // .RemoveKey(key)
-                    cg.EmitCall(ILOpCode.Callvirt, cg.CoreMethods.PhpArray.RemoveKey_IntStringKey);
+                    // .UnsetValue(key)
+                    cg.EmitCall(ILOpCode.Callvirt, cg.CoreMethods.PhpArray.UnsetValue_IntStringKey);
                 }
                 else if (stack == cg.CoreTypes.PhpAlias) // IsWriteRef
                 {
@@ -774,27 +795,44 @@ namespace Pchp.CodeAnalysis.Semantics
             else
             {
                 LoadVariablesArray(cg);         // PhpArray
-                BoundName.EmitIntStringKey(cg); // IntStringKey
+                var key = BoundName.Emit(cg);   // IntStringKey|Long|String
 
                 if (access.IsReadRef)
                 {
                     // CALL <locals>.EnsureItemAlias(<key>) : PhpAlias
+                    cg.EmitConvertToIntStringKey(key);
                     return cg.EmitCall(ILOpCode.Callvirt, cg.CoreMethods.PhpArray.EnsureItemAlias_IntStringKey);
                 }
                 else if (access.EnsureArray)
                 {
                     // CALL <locals>.EnsureItemArray(<key>) : IPhpArray
+                    cg.EmitConvertToIntStringKey(key);
                     return cg.EmitCall(ILOpCode.Callvirt, cg.CoreMethods.PhpArray.EnsureItemArray_IntStringKey);
                 }
                 else if (access.EnsureObject)
                 {
                     // CALL <locals>.EnsureItemObject(<key>) : object
+                    cg.EmitConvertToIntStringKey(key);
                     return cg.EmitCall(ILOpCode.Callvirt, cg.CoreMethods.PhpArray.EnsureItemObject_IntStringKey);
                 }
                 else if (access.IsRead)
                 {
-                    // CALL <locals>.GetItemValue(<key>) : PhpValue
-                    return cg.EmitCall(ILOpCode.Callvirt, cg.CoreMethods.PhpArray.GetItemValue_IntStringKey);
+                    if (key.SpecialType == SpecialType.System_Int64)
+                    {
+                        // CALL <locals>[<long_key>] : PhpValue
+                        return cg.EmitCall(ILOpCode.Callvirt, cg.CoreMethods.PhpArray.get_Item_Long);
+                    }
+                    else if (key.SpecialType == SpecialType.System_String)
+                    {
+                        // CALL <locals>[<string_key>] : PhpValue
+                        return cg.EmitCall(ILOpCode.Callvirt, cg.CoreMethods.PhpArray.get_Item_String);
+                    }
+                    else
+                    {
+                        // CALL <locals>[<key>] : PhpValue
+                        cg.EmitConvertToIntStringKey(key);
+                        return cg.EmitCall(ILOpCode.Callvirt, cg.CoreMethods.PhpArray.get_Item_IntStringKey);
+                    }
                 }
                 else
                 {
@@ -827,8 +865,8 @@ namespace Pchp.CodeAnalysis.Semantics
         internal TypeSymbol LoadIndirectLocal(CodeGenerator cg)
         {
             LoadVariablesArray(cg);
-            BoundName.EmitIntStringKey(cg);
-            return cg.EmitCall(ILOpCode.Newobj, cg.CoreMethods.Ctors.IndirectLocal_PhpArray_IntStringKey);
+            BoundName.EmitVariableName(cg);
+            return cg.EmitCall(ILOpCode.Newobj, cg.CoreMethods.Ctors.IndirectLocal_PhpArray_String);
         }
     }
 

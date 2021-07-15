@@ -84,10 +84,19 @@ namespace Pchp.CodeAnalysis.Symbols
         /// </summary>
         protected override MethodSymbol ResolveSymbol(NamedTypeSymbol/*!*/declaringType)
         {
-            return declaringType.GetMembers(MemberName).OfType<MethodSymbol>().First(MatchesSignature);
+            var members = declaringType.GetMembers(MemberName);
+            for (int i = 0; i < members.Length; i++)
+            {
+                if (members[i] is MethodSymbol m && MatchesSignature(m))
+                {
+                    return m;
+                }
+            }
+
+            throw new InvalidOperationException($"Symbol '{MemberName}' cannot be resolved.");
         }
 
-        protected bool MatchesSignature(MethodSymbol m)
+        protected virtual bool MatchesSignature(MethodSymbol m)
         {
             var ps = m.Parameters;
             if (ps.Length != _ptypes.Length)
@@ -100,6 +109,23 @@ namespace Pchp.CodeAnalysis.Symbols
             return true;
         }
     }
+
+    class CoreGenericMethod : CoreMethod
+    {
+        readonly int _arity;
+
+        public CoreGenericMethod(CoreType declaringClass, string methodName, int arity)
+            : base(declaringClass, methodName, null)
+        {
+            _arity = arity;
+        }
+
+        protected override bool MatchesSignature(MethodSymbol m)
+        {
+            return m.Arity == _arity;
+        }
+    }
+
 
     sealed class CoreField : CoreMember<FieldSymbol>
     {
@@ -237,6 +263,7 @@ namespace Pchp.CodeAnalysis.Symbols
         public readonly ContextHolder Context;
         public readonly DynamicHolder Dynamic;
         public readonly ReflectionHolder Reflection;
+        public readonly HelpersHolder Helpers;
 
         /// <summary>Property name of <c>ScriptAttribute.IsAutoloaded</c>.</summary>
         public static string ScriptAttribute_IsAutoloaded => "IsAutoloaded";
@@ -258,14 +285,21 @@ namespace Pchp.CodeAnalysis.Symbols
             Context = new ContextHolder(types);
             Dynamic = new DynamicHolder(types);
             Reflection = new ReflectionHolder(types);
+            Helpers = new HelpersHolder(types);
         }
 
         public struct OperatorsHolder
         {
+            CoreTypes CoreTypes { get; }
+
             public OperatorsHolder(CoreTypes ct)
             {
+                CoreTypes = ct;
+
                 SetValue_PhpValueRef_PhpValue = ct.Operators.Method("SetValue", ct.PhpValue, ct.PhpValue);
                 PassValue_PhpValueRef = ct.Operators.Method("PassValue", ct.PhpValue);
+                UnsetValue_PhpValueRef = ct.Operators.Method("UnsetValue", ct.PhpValue);
+                UnsetValue_PhpAliasRef = ct.Operators.Method("UnsetValue", ct.PhpAlias);
                 EnsureObject_ObjectRef = ct.Operators.Method("EnsureObject", ct.Object);
                 EnsureArray_PhpArrayRef = ct.Operators.Method("EnsureArray", ct.PhpArray);
                 EnsureArray_IPhpArrayRef = ct.Operators.Method("EnsureArray", ct.IPhpArray);
@@ -320,15 +354,16 @@ namespace Pchp.CodeAnalysis.Symbols
                 IsInstanceOf_Object_PhpTypeInfo = ct.Convert.Method("IsInstanceOf", ct.Object, ct.PhpTypeInfo);
                 ToIntStringKey_PhpValue = ct.Convert.Method("ToIntStringKey", ct.PhpValue);
 
-                Echo_String = ct.Context.Method("Echo", ct.String);
-                Echo_PhpString = ct.Context.Method("Echo", ct.PhpString);
-                Echo_PhpNumber = ct.Context.Method("Echo", ct.PhpNumber);
-                Echo_PhpValue = ct.Context.Method("Echo", ct.PhpValue);
-                Echo_Object = ct.Context.Method("Echo", ct.Object);
-                Echo_Double = ct.Context.Method("Echo", ct.Double);
-                Echo_Long = ct.Context.Method("Echo", ct.Long);
-                Echo_Int32 = ct.Context.Method("Echo", ct.Int32);
-                Echo_Bool = ct.Context.Method("Echo", ct.Boolean);
+                Echo_Object_Context = ct.Operators.Method("Echo", ct.Object, ct.Context);
+                Echo_String_Context = ct.Operators.Method("Echo", ct.String, ct.Context);
+                Echo_PhpString_Context = ct.Operators.Method("Echo", ct.PhpString, ct.Context);
+                Echo_PhpNumber_Context = ct.Operators.Method("Echo", ct.PhpNumber, ct.Context);
+                Echo_PhpValue_Context = ct.Operators.Method("Echo", ct.PhpValue, ct.Context);
+                Echo_PhpAlias_Context = ct.Operators.Method("Echo", ct.PhpAlias, ct.Context);
+                Echo_Double_Context = ct.Operators.Method("Echo", ct.Double, ct.Context);
+                Echo_Long_Context = ct.Operators.Method("Echo", ct.Long, ct.Context);
+                Echo_Int32_Context = ct.Operators.Method("Echo", ct.Int32, ct.Context);
+                Echo_Bool_Context = ct.Operators.Method("Echo", ct.Boolean, ct.Context);
 
                 NormalizePath_string = ct.Operators.Method("NormalizePath", ct.String);
                 ThrowIfArgumentNull_object_int = ct.PhpException.Method("ThrowIfArgumentNull", ct.Object, ct.Int32);
@@ -426,6 +461,7 @@ namespace Pchp.CodeAnalysis.Symbols
 
             public readonly CoreMethod
                 SetValue_PhpValueRef_PhpValue, PassValue_PhpValueRef,
+                UnsetValue_PhpValueRef, UnsetValue_PhpAliasRef,
                 EnsureObject_ObjectRef, EnsureArray_PhpArrayRef, EnsureArray_IPhpArrayRef, EnsureArray_ArrayAccess, EnsureArray_Object, EnsureWritableString_PhpArrayRef,
                 GetItemValue_String_IntStringKey, GetItemValueOrNull_String_IntStringKey, GetItemValue_String_PhpValue_Bool, GetItemValue_String_Int, GetItemValue_PhpValue_PhpValue_Bool,
                 TryGetItemValue_PhpArray_string_PhpValueRef, TryGetItemValue_PhpArray_PhpValue_PhpValueRef, TryGetItemValue_PhpValue_PhpValue_PhpValueRef,
@@ -442,7 +478,7 @@ namespace Pchp.CodeAnalysis.Symbols
                 AsObject_PhpValue, AsArray_PhpValue, ToArray_PhpValue, GetArrayAccess_PhpValueRef, ToPhpString_PhpValue_Context, ToClass_PhpValue, ToClass_IPhpArray, AsCallable_PhpValue_RuntimeTypeHandle_Object, AsCallable_String_RuntimeTypeHandle_Object,
                 IsInstanceOf_Object_PhpTypeInfo,
                 ToIntStringKey_PhpValue,
-                Echo_Object, Echo_String, Echo_PhpString, Echo_PhpNumber, Echo_PhpValue, Echo_Double, Echo_Long, Echo_Int32, Echo_Bool,
+                Echo_Object_Context, Echo_String_Context, Echo_PhpString_Context, Echo_PhpNumber_Context, Echo_PhpValue_Context, Echo_PhpAlias_Context, Echo_Double_Context, Echo_Long_Context, Echo_Int32_Context, Echo_Bool_Context,
 
                 NormalizePath_string,
                 ThrowIfArgumentNull_object_int,
@@ -491,6 +527,17 @@ namespace Pchp.CodeAnalysis.Symbols
 
             public readonly CoreProperty
                 GetName_PhpTypeInfo, GetTypeHandle_PhpTypeInfo;
+
+            public MethodSymbol Echo_ByteArray_Context
+            {
+                get
+                {
+                    // Operators.Echo( byte[], Context )
+                    return CoreTypes.Operators.Symbol.GetMembers("Echo").OfType<MethodSymbol>().Single(
+                            m => m.ParameterCount == 2 && m.Parameters[0].Type.IsByteArray() && SpecialParameterSymbol.IsContextParameter(m.Parameters[1])
+                        );
+                }
+            }
         }
 
         public struct PhpValueHolder
@@ -512,7 +559,7 @@ namespace Pchp.CodeAnalysis.Symbols
                 GetValue = ct.PhpValue.Method("GetValue");
                 ToArray = ct.PhpValue.Method("ToArray");
                 AsObject = ct.PhpValue.Method("AsObject");
-                
+
                 Long = ct.PhpValue.Property("Long");
                 Double = ct.PhpValue.Property("Double");
                 Boolean = ct.PhpValue.Property("Boolean");
@@ -533,6 +580,7 @@ namespace Pchp.CodeAnalysis.Symbols
 
                 FromClr_Object = ct.PhpValue.Method("FromClr", ct.Object);
                 FromClass_Object = ct.PhpValue.Method("FromClass", ct.Object);
+                FromStruct_T = new CoreGenericMethod(ct.PhpValue, "FromStruct", 1);
 
                 Null = ct.PhpValue.Field("Null");
                 True = ct.PhpValue.Field("True");
@@ -546,14 +594,26 @@ namespace Pchp.CodeAnalysis.Symbols
                 Eq_PhpValue_PhpValue, Eq_PhpValue_String, Eq_String_PhpValue,
                 Ineq_PhpValue_PhpValue, Ineq_PhpValue_String, Ineq_String_PhpValue,
                 Create_Boolean, Create_Long, Create_Int, Create_Double, Create_String, Create_PhpString, Create_PhpNumber, Create_PhpAlias, Create_PhpArray, Create_IntStringKey,
-                FromClr_Object, FromClass_Object;
+                FromClr_Object, FromClass_Object, FromStruct_T;
 
             public readonly CoreField
                 Null, True, False;
 
             public readonly CoreProperty
                 Object, Long, Double, Boolean, String, Array;
+        }
 
+        public struct HelpersHolder
+        {
+            public HelpersHolder(CoreTypes ct)
+            {
+                EmptyRuntimeTypeHandle = ct.Helpers.Field(nameof(EmptyRuntimeTypeHandle));
+                EmptyNullable_T = ct.Helpers.Method(nameof(EmptyNullable_T));
+            }
+
+            public readonly CoreField EmptyRuntimeTypeHandle;
+
+            public readonly CoreMethod EmptyNullable_T;
         }
 
         public struct PhpAliasHolder
@@ -749,6 +809,8 @@ namespace Pchp.CodeAnalysis.Symbols
 
                 IsNull_PhpString = ct.PhpString.Method("IsNull", ct.PhpString);
 
+                Default = ct.PhpString.Field(nameof(Default));
+
                 implicit_from_string = ct.String.CastImplicit(ct.PhpString);
             }
 
@@ -757,21 +819,46 @@ namespace Pchp.CodeAnalysis.Symbols
                 EnsureWritable, AsWritable_PhpString, AsArray_PhpString,
                 IsNull_PhpString;
 
+            public readonly CoreField
+                Default;
+
             public readonly CoreCast
                 implicit_from_string;
         }
 
         public struct PhpStringBlobHolder
         {
+            CoreTypes CoreTypes { get; }
+
             public PhpStringBlobHolder(CoreTypes ct)
             {
+                CoreTypes = ct;
+
                 Add_String = ct.PhpString_Blob.Method("Add", ct.String);
                 Add_PhpString = ct.PhpString_Blob.Method("Add", ct.PhpString);
                 Add_PhpValue_Context = ct.PhpString_Blob.Method("Add", ct.PhpValue, ct.Context);
+
+                _Add_ByteArray = null; // lazy
             }
 
             public readonly CoreMethod
                 Add_String, Add_PhpString, Add_PhpValue_Context;
+
+            public MethodSymbol Add_ByteArray
+            {
+                get
+                {
+                    if (_Add_ByteArray == null)
+                    {
+                        _Add_ByteArray = CoreTypes.PhpString_Blob.Symbol.GetMembers("Add").OfType<MethodSymbol>().Single(
+                            m => m.ParameterCount == 1 && m.Parameters[0].Type.IsByteArray()
+                        );
+                    }
+                    return _Add_ByteArray;
+                }
+            }
+
+            MethodSymbol _Add_ByteArray;
         }
 
         public struct IPhpArrayHolder
@@ -823,9 +910,14 @@ namespace Pchp.CodeAnalysis.Symbols
                 ToString_Context = t.Method("ToString", ct.Context);
                 ToClass = t.Method("ToClass");
 
-                RemoveKey_IntStringKey = t.Method("RemoveKey", ct.IntStringKey);
+                get_Item_IntStringKey = ct.PhpHashtable.Method("get_Item", ct.IntStringKey);
+                get_Item_String = ct.PhpHashtable.Method("get_Item", ct.String);
+                get_Item_Long = ct.PhpHashtable.Method("get_Item", ct.Long);
 
-                GetItemValue_IntStringKey = t.Method("GetItemValue", ct.IntStringKey);
+                RemoveKey_IntStringKey = t.Method("RemoveKey", ct.IntStringKey);
+                UnsetValue_IntStringKey = t.Method("UnsetValue", ct.IntStringKey);
+
+                GetItemValue_IntStringKey = get_Item_IntStringKey; // 
                 GetItemRef_IntStringKey = t.Method("GetItemRef", ct.IntStringKey);
 
                 DeepCopy = t.Method("DeepCopy");
@@ -849,7 +941,8 @@ namespace Pchp.CodeAnalysis.Symbols
 
             public readonly CoreMethod
                 ToClass, ToString_Context,
-                RemoveKey_IntStringKey,
+                get_Item_String, get_Item_Long, get_Item_IntStringKey,
+                RemoveKey_IntStringKey, UnsetValue_IntStringKey,
                 GetItemValue_IntStringKey, GetItemRef_IntStringKey,
                 SetItemValue_IntStringKey_PhpValue, SetItemAlias_IntStringKey_PhpAlias, Add_PhpValue,
                 EnsureItemObject_IntStringKey, EnsureItemArray_IntStringKey, EnsureItemAlias_IntStringKey,
@@ -870,6 +963,7 @@ namespace Pchp.CodeAnalysis.Symbols
                 PhpString_PhpValue_Context = ct.PhpString.Ctor(ct.PhpValue, ct.Context);
                 PhpString_PhpString = ct.PhpString.Ctor(ct.PhpString);
                 Blob = ct.PhpString_Blob.Ctor();
+                Blob_int = ct.PhpString_Blob.Ctor(ct.Int32);
                 PhpArray = ct.PhpArray.Ctor();
                 PhpArray_int = ct.PhpArray.Ctor(ct.Int32);
                 IntStringKey_long = ct.IntStringKey.Ctor(ct.Long);
@@ -889,19 +983,19 @@ namespace Pchp.CodeAnalysis.Symbols
                 ScriptDiedException_Long = ct.ScriptDiedException.Ctor(ct.Long);
                 ScriptDiedException_PhpValue = ct.ScriptDiedException.Ctor(ct.PhpValue);
 
-                IndirectLocal_PhpArray_IntStringKey = ct.IndirectLocal.Ctor(ct.PhpArray, ct.IntStringKey);
+                IndirectLocal_PhpArray_String = ct.IndirectLocal.Ctor(ct.PhpArray, ct.String);
             }
 
             public readonly CoreConstructor
                 PhpArray, PhpArray_int,
                 PhpString_Blob, PhpString_PhpString, PhpString_string_string, PhpString_PhpValue_Context,
-                Blob,
+                Blob, Blob_int,
                 IntStringKey_long, IntStringKey_string,
                 ScriptAttribute_string_long, PhpTraitAttribute, PharAttribute_string, PhpTypeAttribute_string_string, PhpTypeAttribute_string_string_byte, PhpFieldsOnlyCtorAttribute, PhpHiddenAttribute,
                 DefaultValueAttribute_string,
                 NullableAttribute_byte, NullableContextAttribute_byte,
                 ScriptDiedException, ScriptDiedException_Long, ScriptDiedException_PhpValue,
-                IndirectLocal_PhpArray_IntStringKey;
+                IndirectLocal_PhpArray_String;
         }
 
         public struct ContextHolder
@@ -922,6 +1016,7 @@ namespace Pchp.CodeAnalysis.Symbols
                 Include_string_string_PhpArray_object_RuntimeTypeHandle_bool_bool = ct.Context.Method("Include", ct.String, ct.String, ct.PhpArray, ct.Object, ct.RuntimeTypeHandle, ct.Boolean, ct.Boolean);
 
                 ExpectTypeDeclared_T = ct.Context.Method("ExpectTypeDeclared");
+                ExpectTypeDeclared_PhpTypeInfo = ct.Context.Method("ExpectTypeDeclared", ct.PhpTypeInfo);
 
                 GetStatic_T = ct.Context.Method("GetStatic");
                 GetDeclaredType_string_bool = ct.Context.Method("GetDeclaredType", ct.String, ct.Boolean);
@@ -947,7 +1042,7 @@ namespace Pchp.CodeAnalysis.Symbols
                 DeclareFunction_RoutineInfo, DeclareType_T, DeclareType_PhpTypeInfo_String,
                 DisableErrorReporting, EnableErrorReporting,
                 CheckIncludeOnce_TScript, OnInclude_TScript, Include_string_string_PhpArray_object_RuntimeTypeHandle_bool_bool,
-                ExpectTypeDeclared_T,
+                ExpectTypeDeclared_T, ExpectTypeDeclared_PhpTypeInfo,
                 GetStatic_T,
                 GetDeclaredType_string_bool, GetDeclaredTypeOrThrow_string_bool,
                 Assert_bool_PhpValue,

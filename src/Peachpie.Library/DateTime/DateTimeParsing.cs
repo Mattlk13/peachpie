@@ -128,24 +128,24 @@ namespace Pchp.Library.DateTime
 
         #region Parse
 
-        public static System.DateTime Parse(Context ctx, string/*!*/ str, System.DateTime utcStart, TimeZoneInfo timeZone, out string error)
+        public static System.DateTime Parse(string/*!*/ datestr, System.DateTime refdate, ref TimeZoneInfo localtz, out string error)
         {
-            Debug.Assert(str != null);
+            Debug.Assert(datestr != null);
 
-            var scanner = new Scanner(new StringReader(str.ToLowerInvariant()));
-            while (true)
+            var scanner = new Scanner(new StringReader(datestr.ToLowerInvariant()));
+            for (; ; )
             {
                 var token = scanner.GetNextToken();
-                if (token == Tokens.ERROR || scanner.Errors > 0)
+                if (token == Tokens.ERROR || scanner.Errors != 0)
                 {
-                    error = string.Format(LibResources.parse_error, scanner.Position, str.Substring(scanner.Position));
+                    error = string.Format(LibResources.parse_error, scanner.Position, datestr.Substring(scanner.Position));
                     return System.DateTime.MinValue;
                 }
 
                 if (token == Tokens.EOF)
                 {
                     error = null;
-                    return scanner.Time.GetDateTime(ctx, utcStart, timeZone);
+                    return scanner.Time.GetDateTime(refdate, ref localtz);
                 }
             }
         }
@@ -189,6 +189,16 @@ namespace Pchp.Library.DateTime
             }
         }
 
+        static string GetTimeZoneString(int offset_minutes)
+        {
+            // [+-]00:00
+            return
+                (offset_minutes < 0 ? "" : "+") +
+                (offset_minutes / 60).ToString("D2") +
+                ":" +
+                (offset_minutes % 60).ToString("D2");
+        }
+
         string GetTimeZoneString()
         {
             if (have_zone > 0)
@@ -200,12 +210,7 @@ namespace Pchp.Library.DateTime
                 }
                 else
                 {
-                    // [+-]00:00
-                    return
-                        (z < 0 ? "-" : "+") +
-                        (z / 60).ToString("D2") +
-                        ":" +
-                        (z % 60).ToString("D2");
+                    return GetTimeZoneString(z);
                 }
             }
 
@@ -218,7 +223,7 @@ namespace Pchp.Library.DateTime
         /// <exception cref="InvalidOperationException">The time zone is not specified.</exception>
         public TimeZoneInfo ResolveTimeZone()
         {
-            if (have_zone > 0)
+            if (have_zone != 0)
             {
                 //// fast special cases:
                 //if (z == 0)
@@ -231,7 +236,7 @@ namespace Pchp.Library.DateTime
 
                 // create time zone object wth our offset:
                 var name = GetTimeZoneString();
-                return TimeZoneInfo.CreateCustomTimeZone(name, TimeSpan.FromMinutes(z), null, null);
+                return TimeZoneInfo.CreateCustomTimeZone(name, TimeSpan.FromMinutes(z), name, null);
             }
 
             throw new InvalidOperationException();
@@ -257,12 +262,22 @@ namespace Pchp.Library.DateTime
             }
         }
 
-        public System.DateTime GetDateTime(Context ctx, System.DateTime utcStart, TimeZoneInfo timeZone = null)
+        /// <summary>
+        /// Converts the parsed datetime value into the complete <see cref="System.DateTime"/> value.
+        /// </summary>
+        /// <param name="refdate">Reference date and time, either UTC or a Local time.</param>
+        /// <param name="localtz">Local time zone. Can be updated. Must not be <c>null</c>.</param>
+        /// <returns>Local date and time corresponding to the <paramref name="localtz"/>.</returns>
+        public System.DateTime GetDateTime(System.DateTime refdate, ref TimeZoneInfo localtz)
         {
-            var zone = timeZone ?? PhpTimeZone.GetCurrentTimeZone(ctx);
-            var start = TimeZoneInfo.ConvertTime(utcStart, TimeZoneInfo.Utc, zone);// zone.ToLocalTime(utcStart);
+            var zone = localtz ?? throw new ArgumentNullException(nameof(localtz));
+            var start = refdate.Kind == DateTimeKind.Utc
+                ? TimeZoneInfo.ConvertTimeFromUtc(refdate, zone)
+                : refdate;
 
-            // following operates on local time defined by the parsed info or by the current time zone //
+            // following operates on local time defined by the parsed info or by the current time zone
+
+            // TODO: handle years <= 0 or > 9999, add something like year_offset https://github.com/peachpiecompiler/peachpie/issues/550
 
             if (have_date > 0 && have_time == 0)
             {
@@ -292,12 +307,13 @@ namespace Pchp.Library.DateTime
             if (d == -1) d = start.Day;
             else if (d == 0) { d = 1; --relative.d; }
 
-            CheckOverflows(y, m, ref d, ref h, out var days_overflow);
-
-            var result = new System.DateTime(y, m, d, h, i, s, (int)(f * 1000), DateTimeKind.Unspecified);
-
             // relative years and months:
-            result = result.AddMonths(relative.y * 12 + relative.m);
+            m += relative.y * 12 + relative.m;
+            
+            // normalize month, day
+            CheckOverflows(ref y, ref m, ref d, ref h, out var days_overflow);
+
+            var result = new System.DateTime(y, m, d, h, i, s, (int)(f * 1000), DateTimeKind.Unspecified); // CONSIDER: DateTimeKind.Local (?)
 
             // check relative ranges
             if (relative.s >= long.MaxValue / TimeSpan.TicksPerSecond) return System.DateTime.MaxValue;
@@ -335,30 +351,12 @@ namespace Pchp.Library.DateTime
                     result = result.AddDays(dow - relative.weekday - 7);
             }
 
-            // convert to UTC:
-            if (have_zone > 0)
+            // parse the timezone at the end,
+            // note: result is not converted
+            if (have_zone != 0)
             {
-                result = result.AddMinutes(-z);
-                result = TimeZoneInfo.ConvertTimeToUtc(result, TimeZoneInfo.Utc); // Just mark that it's in UTC already
+                localtz = ResolveTimeZone();
             }
-            else
-            {
-                if (zone.IsInvalidTime(result))
-                {
-                    // We ended up in an invalid time. This time was skipped because of day-light saving change.
-                    // Figure out the direction we were moving, and step in the direction until the next valid time.
-                    int secondsStep = ((result - utcStart).Ticks >= 0) ? 1 : -1;
-                    do
-                    {
-                        result = result.AddSeconds(secondsStep);
-                    }
-                    while (zone.IsInvalidTime(result));
-                }
-
-                result = TimeZoneInfo.ConvertTime(result, zone, TimeZoneInfo.Utc);// zone.ToUniversalTime(result);
-            }
-
-            Debug.Assert(result.Kind == DateTimeKind.Utc);
 
             //
             return result;
@@ -443,6 +441,7 @@ namespace Pchp.Library.DateTime
         }
 
         /// <summary>
+        /// Adjusts year and month if months are out of range (1..12).
         /// Checks how many days given year/month/day/hour overflows (as it is possible in PHP format).
         /// </summary>
         /// <param name="y">parsed year</param>
@@ -450,8 +449,10 @@ namespace Pchp.Library.DateTime
         /// <param name="d">parsed day</param>
         /// <param name="h">parsed hour (24 is problem)</param>
         /// <param name="days_overflow">resulting amount of overflowing days (will be added to the resulting DateTime).</param>
-        private static void CheckOverflows(int y, int m, ref int d, ref int h, out int days_overflow)
+        private static void CheckOverflows(ref int y, ref int m, ref int d, ref int h, out int days_overflow)
         {
+            NormalizeMonth(ref y, ref m);
+
             days_overflow = 0;
 
             int daysinmonth_overflow = d - DateInfo.DaysInMonthFixed(y, m);
@@ -471,6 +472,30 @@ namespace Pchp.Library.DateTime
                 h = 0;
                 ++days_overflow;
             }
+        }
+
+        private static void NormalizeMonth(ref int year, ref int month)
+        {
+            // month supposes to be in range [1..12]
+            // other values are relative to 1
+
+            if (month > 12)
+            {
+                year += (month - 1) / 12;
+                month = ((month - 1) % 12) + 1;
+            }
+            else if (month < 1)
+            {
+                // note: month == 0 => previous year, month 12
+
+                var relative_years = (month - 1) / 12 - 1; // always < 0
+
+                year += relative_years;
+                month -= relative_years * 12;
+            }
+
+            Debug.Assert(month >= 1);
+            Debug.Assert(month <= 12);
         }
 
         public static int ParseSignedInt(string str, ref int pos, int maxDigits)

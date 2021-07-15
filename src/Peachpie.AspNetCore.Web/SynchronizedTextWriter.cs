@@ -12,7 +12,7 @@ using Microsoft.AspNetCore.Http;
 namespace Peachpie.AspNetCore.Web
 {
     /// <summary>
-    /// <see cref="TextWriter"/> implementation passing text to underlaying response stream in given encoding.
+    /// <see cref="TextWriter"/> implementation passing text to underlying response stream in given encoding.
     /// </summary>
     sealed class SynchronizedTextWriter : TextWriter
     {
@@ -27,6 +27,11 @@ namespace Peachpie.AspNetCore.Web
 #if NETSTANDARD2_0
         readonly char[] _charBuffer = new char[1];
 #endif
+
+        /// <summary>
+        /// Invariant number format provider.
+        /// </summary>
+        public override IFormatProvider FormatProvider => Pchp.Core.Context.InvariantNumberFormatInfo;
 
         public SynchronizedTextWriter(HttpResponse response, Encoding encoding)
         {
@@ -47,7 +52,7 @@ namespace Peachpie.AspNetCore.Web
         }
 
         /// <summary>
-        /// Writes a sequence of bytes into the underlaying stream.
+        /// Writes a sequence of bytes into the underlying stream.
         /// </summary>
         public void Write(byte[] buffer, int count)
         {
@@ -103,7 +108,7 @@ namespace Peachpie.AspNetCore.Web
             var nbytes = Encoding.GetBytes(chars, _encodedCharBuffer);
 #endif
 
-            Write(_encodedCharBuffer, nbytes); // NOTE: _tmp is copied by the underlaying pipe
+            Write(_encodedCharBuffer, nbytes); // NOTE: _tmp is copied by the underlying pipe
         }
 
         public override void Flush() => FlushAsync().GetAwaiter().GetResult();

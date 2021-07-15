@@ -295,7 +295,7 @@
     <value>Configuration option '{0}' is not known</value>
   </data>
   <data name="segment_length_not_positive" xml:space="preserve">
-    <value>The segment length must be greater then zero</value>
+    <value>The length of each segment must be greater than zero</value>
   </data>
   <data name="zero_argument_invalid" xml:space="preserve">
     <value>Zero is not a valid argument number</value>
@@ -457,7 +457,7 @@
     <value>File type not recognized</value>
   </data>
   <data name="socket_open_error" xml:space="preserve">
-    <value>Error connecting '{0}': {0}</value>
+    <value>Error connecting '{0}': {1}</value>
   </data>
   <data name="socket_open_timeout" xml:space="preserve">
     <value>Connect timeout: {0} did not respond</value>
@@ -728,5 +728,14 @@
   </data>
   <data name="bcmath_wrong_argument" xml:space="preserve">
     <value>bcmath function argument is not well-formed</value>
+  </data>
+  <data name="serialization_json_utf8_error" xml:space="preserve">
+    <value>Malformed UTF-8 characters, possibly incorrectly encoded</value>
+  </data>
+  <data name="socket_accept_timeout" xml:space="preserve">
+    <value>A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.</value>
+  </data>
+  <data name="glob_invalid_flags" xml:space="preserve">
+    <value>The flag {0} is invalid or not supported on this platform</value>
   </data>
 </root>

@@ -323,7 +323,7 @@ namespace Pchp.Core
             switch (TypeCode)
             {
                 case PhpTypeCode.Null:
-                    number = PhpNumber.Create(0L);
+                    number = PhpNumber.Default; // 0L
                     return Convert.NumberInfo.LongInteger;
 
                 case PhpTypeCode.Boolean:
@@ -362,7 +362,7 @@ namespace Pchp.Core
         {
             PhpTypeCode.Null => string.Empty,
             PhpTypeCode.Boolean => Convert.ToString(Boolean),
-            PhpTypeCode.Long => Long.ToString(),
+            PhpTypeCode.Long => Convert.ToString(Long),
             PhpTypeCode.Double => Convert.ToString(Double),
             PhpTypeCode.PhpArray => (string)Array,
             PhpTypeCode.String => String,
@@ -378,7 +378,7 @@ namespace Pchp.Core
         {
             PhpTypeCode.Null => string.Empty,
             PhpTypeCode.Boolean => Convert.ToString(Boolean),
-            PhpTypeCode.Long => Long.ToString(),
+            PhpTypeCode.Long => Convert.ToString(Long),
             PhpTypeCode.Double => Convert.ToString(Double),
             PhpTypeCode.PhpArray => (string)Array,
             PhpTypeCode.String => String,
@@ -398,6 +398,7 @@ namespace Pchp.Core
         public static implicit operator PhpValue(long value) => Create(value);
         public static implicit operator PhpValue(ulong value) => Create(value);
         public static implicit operator PhpValue(double value) => Create(value);
+        public static explicit operator PhpValue(decimal value) => Create((double)value); // loosing precision
         public static implicit operator PhpValue(PhpNumber value) => Create(value);
         public static implicit operator PhpValue(IntStringKey value) => Create(value);
         public static implicit operator PhpValue(string value) => Create(value);
@@ -640,19 +641,7 @@ namespace Pchp.Core
         /// Zero for equality,
         /// negative value for <c>this</c> &lt; <paramref name="right"/>,
         /// position value for <c>this</c> &gt; <paramref name="right"/>.</returns>
-        public int Compare(PhpValue right) => TypeCode switch
-        {
-            PhpTypeCode.Null => Comparison.CompareNull(right),
-            PhpTypeCode.Boolean => Comparison.Compare(Boolean, right),
-            PhpTypeCode.Long => Comparison.Compare(Long, right),
-            PhpTypeCode.Double => Comparison.Compare(Double, right),
-            PhpTypeCode.PhpArray => Array.Compare(right),
-            PhpTypeCode.String => Comparison.Compare(String, right),
-            PhpTypeCode.MutableString => Comparison.Compare(MutableStringBlob.ToString(), right),
-            PhpTypeCode.Object => Comparison.Compare(Object, right),
-            PhpTypeCode.Alias => Alias.Value.Compare(right),
-            _ => throw InvalidTypeCodeException(),
-        };
+        public int Compare(PhpValue right) => Comparison.Compare(this, right);
 
         /// <summary>
         /// Performs strict comparison.
@@ -669,7 +658,7 @@ namespace Pchp.Core
             PhpTypeCode.Double => right.IsDouble(out var d) && d == Double,
             PhpTypeCode.PhpArray => Array.StrictCompareEq(right.AsArray()),
             PhpTypeCode.String => right.IsString(out var s) && s == String,
-            PhpTypeCode.MutableString => right.IsString(out var s) && s.Length == MutableStringBlob.Length && s == MutableStringBlob.ToString(),
+            PhpTypeCode.MutableString => StrictComparison.Ceq(MutableStringBlob, right),
             PhpTypeCode.Object => right.AsObject() == Object,
             PhpTypeCode.Alias => Alias.Value.StrictEquals(right),
             _ => throw InvalidTypeCodeException(),
@@ -928,7 +917,7 @@ namespace Pchp.Core
                 case PhpTypeCode.Double: return Double;
                 case PhpTypeCode.PhpArray:
                 case PhpTypeCode.String:
-                case PhpTypeCode.Object: return Object;
+                case PhpTypeCode.Object: return Object is IStructBox box ? box.BoxedValue : Object;
                 case PhpTypeCode.MutableString: return MutableStringBlob.ToString();
                 case PhpTypeCode.Alias: return Alias.Value.ToClr();
                 default:
@@ -944,7 +933,7 @@ namespace Pchp.Core
         /// <exception cref="InvalidCastException">The value cannot be converted to specified <paramref name="type"/>.</exception>
         public object ToClr(Type type)
         {
-            if (type == typeof(PhpValue)) return this;
+            if (type == typeof(PhpValue)) return GetValue();
 
             if (type == typeof(long)) return (long)this;
             if (type == typeof(int)) return (int)(long)this;
@@ -956,14 +945,18 @@ namespace Pchp.Core
             if (type == typeof(string)) return this.ToString();
             if (type == typeof(object)) return this.ToClass();
 
-            if (this.Object != null && type.IsAssignableFrom(this.Object.GetType()))
+            var obj = this.Object;
+            if (obj != null)
             {
-                return this.Object;
-            }
+                if (obj is IStructBox box)
+                {
+                    obj = box.BoxedValue;
+                }
 
-            if (type == typeof(PhpAlias) && IsAlias)
-            {
-                return Alias;
+                if (type.IsAssignableFrom(obj.GetType()))
+                {
+                    return obj;
+                }
             }
 
             //if (type.IsNullable_T(out var nullable_t))
@@ -1193,18 +1186,21 @@ namespace Pchp.Core
 
         public static PhpValue Create(PhpArray value) => new PhpValue(PhpTypeCode.PhpArray, value);
 
-        public static PhpValue Create(IPhpArray value) => value is PhpArray arr ? Create(arr) : FromClass(value);
+        public static PhpValue Create(IPhpArray value) =>
+            value is PhpArray arr ? Create(arr) :
+            value is PhpString.Blob blob ? Create(blob) :
+            FromClass(value);
 
         public static PhpValue Create(PhpAlias value) => new PhpValue(PhpTypeCode.Alias, value);
 
         /// <summary>
         /// Creates <see cref="PhpValue"/> from <see cref="Nullable{T}"/>.
-        /// In case <see cref="Nullable{T}.HasValue"/> is <c>false</c>, a <see cref="PhpValue.False"/> is returned.
+        /// In case <see cref="Nullable{T}.HasValue"/> is <c>false</c>, a <see cref="PhpValue.Null"/> is returned.
         /// </summary>
         /// <typeparam name="T">Nullable type argument.</typeparam>
         /// <param name="value">Original value to convert from.</param>
-        /// <returns><see cref="PhpValue"/> containing value of given nullable, or <c>FALSE</c> if nullable has no value.</returns>
-        public static PhpValue Create<T>(T? value) where T : struct => value.HasValue ? FromClr(value.GetValueOrDefault()) : PhpValue.False;
+        /// <returns><see cref="PhpValue"/> containing value of given nullable, or <c>NULL</c> if nullable has no value.</returns>
+        public static PhpValue Create<T>(T? value) where T : struct => value.HasValue ? FromStruct(value.GetValueOrDefault()) : PhpValue.Null;
 
         /// <summary>
         /// Creates value containing new <see cref="PhpAlias"/> pointing to <c>NULL</c> value.
@@ -1236,8 +1232,28 @@ namespace Pchp.Core
 
         public static PhpValue FromClass(object value)
         {
-            Debug.Assert(!(value is int || value is long || value is bool || value is string || value is double || value is PhpAlias || value is PhpString || value is PhpArray));
+            Debug.Assert(!(value is int || value is long || value is bool || value is string || value is double || value is PhpAlias || value is PhpString || value is PhpArray || value is PhpString.Blob));
             return new PhpValue(PhpTypeCode.Object, value);
+        }
+
+        public static PhpValue FromStruct<TValue>(TValue value) where TValue : struct
+        {
+            Debug.Assert(typeof(TValue) != typeof(decimal));
+            Debug.Assert(typeof(TValue) != typeof(void));
+            Debug.Assert(typeof(TValue) != typeof(bool));
+            Debug.Assert(typeof(TValue) != typeof(int));
+            Debug.Assert(typeof(TValue) != typeof(long));
+            Debug.Assert(typeof(TValue) != typeof(double));
+            Debug.Assert(typeof(TValue) != typeof(PhpString));
+            Debug.Assert(typeof(TValue) != typeof(IntStringKey));
+            Debug.Assert(typeof(TValue) != typeof(PhpValue));
+            Debug.Assert(!typeof(TValue).IsNullable_T(out _));
+
+            //// TODO: we might need to wrap the value into our own "box"
+            //// so non-readonly methods would modify the "box" instance
+            //return new PhpValue(PhpTypeCode.Object, new StructBox<TValue>(value));
+
+            return FromClr((object)value);
         }
 
         /// <summary>
@@ -1261,9 +1277,11 @@ namespace Pchp.Core
                 if (value.GetType() == typeof(PhpNumber)) return Create((PhpNumber)value);
                 if (value.GetType() == typeof(uint)) return Create((long)(uint)value);
                 if (value.GetType() == typeof(byte[])) return Create(new PhpString((byte[])value));
+                if (value.GetType() == typeof(decimal)) return Create((double)(decimal)value); // downcast to double
                 if (value.GetType() == typeof(IntStringKey)) return Create((IntStringKey)value);
 
                 // object        
+                //if (value is IStructBox box) return FromClass(box);
                 return FromClass(value);
             }
             else

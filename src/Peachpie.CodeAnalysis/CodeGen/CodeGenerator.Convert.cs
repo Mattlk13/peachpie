@@ -38,9 +38,9 @@ namespace Pchp.CodeAnalysis.CodeGen
         /// </summary>
         internal void EmitStructAddr(TypeSymbol t) => _il.EmitStructAddr(t);
 
-        public void EmitConvertToBool(TypeSymbol from, TypeRefMask fromHint)
+        public TypeSymbol EmitConvertToBool(TypeSymbol from, TypeRefMask fromHint)
         {
-            this.EmitImplicitConversion(from, CoreTypes.Boolean);
+            return this.EmitImplicitConversion(from, CoreTypes.Boolean);
         }
 
         public void EmitConvertToBool(BoundExpression expr)
@@ -96,8 +96,7 @@ namespace Pchp.CodeAnalysis.CodeGen
 
                 if (from.IsReferenceType)
                 {
-                    EmitCall(ILOpCode.Call, CoreMethods.PhpValue.FromClass_Object)
-                        .Expect(CoreTypes.PhpValue);
+                    EmitCall(ILOpCode.Call, CoreMethods.PhpValue.FromClass_Object).Expect(CoreTypes.PhpValue);
                 }
                 else if (from.SpecialType == SpecialType.System_Void)
                 {
@@ -106,7 +105,9 @@ namespace Pchp.CodeAnalysis.CodeGen
                 }
                 else
                 {
-                    throw ExceptionUtilities.NotImplementedException(this, $"{from.Name} -> PhpValue");
+                    // box & wrap to PhpValue.Object
+                    // Template: PhpValue.FromStruct<T>( STACK )
+                    EmitCall(ILOpCode.Call, CoreMethods.PhpValue.FromStruct_T.Symbol.Construct(from)).Expect(CoreTypes.PhpValue);
                 }
             }
             //
@@ -456,6 +457,17 @@ namespace Pchp.CodeAnalysis.CodeGen
                 return;
             }
 
+            // -> Delegate
+            if (to.IsDelegateType())
+            {
+                // PhpCallableToDelegate<to>.Get( IPhpCallable, Context ) : to
+                EmitConvertToIPhpCallable(from, fromHint);
+                EmitLoadContext();
+                var get_callable_ctx = (MethodSymbol)CoreTypes.PhpCallableToDelegate.Symbol.Construct(to).GetMembers("Get").SingleOrDefault();
+                EmitCall(ILOpCode.Callvirt, get_callable_ctx).Expect(to);
+                return;
+            }
+
             Debug.Assert(to != CoreTypes.PhpArray && to != CoreTypes.PhpString && to != CoreTypes.PhpAlias);
 
             switch (from.SpecialType)
@@ -528,6 +540,14 @@ namespace Pchp.CodeAnalysis.CodeGen
         }
 
         /// <summary>
+        /// Converts the value on stack to <c>IntStringKey</c>.
+        /// </summary>
+        public TypeSymbol EmitConvertToIntStringKey(TypeSymbol from)
+        {
+            return this.EmitImplicitConversion(from, this.CoreTypes.IntStringKey);
+        }
+
+        /// <summary>
         /// Emits expression and converts it to required type.
         /// </summary>
         public void EmitConvert(BoundExpression expr, TypeSymbol to, ConversionKind conversion = ConversionKind.Implicit, bool notNull = false)
@@ -578,7 +598,7 @@ namespace Pchp.CodeAnalysis.CodeGen
                 if (place != null && place.HasAddress && place.Type != null && place.Type.IsValueType)
                 {
                     var conv = DeclaringCompilation.Conversions.ClassifyConversion(place.Type, to, conversion);
-                    if (conv.Exists && conv.IsUserDefined && !conv.MethodSymbol.IsStatic)
+                    if (conv.Exists && conv.IsUserDefined && !conv.MethodSymbol.IsStatic && !conv.IsNullable)
                     {
                         // (ADDR expr).Method()
                         this.EmitImplicitConversion(EmitCall(ILOpCode.Call, (MethodSymbol)conv.MethodSymbol, expr, ImmutableArray<BoundArgument>.Empty), to, @checked: true);

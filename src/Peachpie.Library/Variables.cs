@@ -184,7 +184,7 @@ namespace Pchp.Library
         /// </summary>
         /// <param name="variable">The variable which items to count.</param>
         /// <param name="mode">Whether to count recursively.</param>
-        /// <returns>The number of items in all arrays contained recursivelly in <paramref name="variable"/>.</returns>
+        /// <returns>The number of items in all arrays contained recursively in <paramref name="variable"/>.</returns>
         /// <remarks>If any item of the <paramref name="variable"/> contains infinite recursion 
         /// skips items that are repeating because of such recursion.
         /// </remarks>
@@ -194,12 +194,22 @@ namespace Pchp.Library
         /// Counts items in a variable.
         /// </summary>
         /// <param name="variable">The variable which items to count.</param>
-        /// <param name="mode">Whether to count recursively.</param>
-        /// <returns>The number of items in all arrays contained recursivelly in <paramref name="variable"/>.</returns>
+        /// <returns>The number of items in all arrays contained recursively in <paramref name="variable"/>.</returns>
         /// <remarks>If any item of the <paramref name="variable"/> contains infinite recursion 
         /// skips items that are repeating because of such recursion.
         /// </remarks>
-        public static long count(PhpValue variable, int mode = COUNT_NORMAL)
+        public static long count(PhpValue variable) => count(variable, mode: COUNT_NORMAL);
+
+        /// <summary>
+        /// Counts items in a variable.
+        /// </summary>
+        /// <param name="variable">The variable which items to count.</param>
+        /// <param name="mode">Whether to count recursively.</param>
+        /// <returns>The number of items in all arrays contained recursively in <paramref name="variable"/>.</returns>
+        /// <remarks>If any item of the <paramref name="variable"/> contains infinite recursion 
+        /// skips items that are repeating because of such recursion.
+        /// </remarks>
+        public static long count(PhpValue variable, int mode /*= COUNT_NORMAL*/)
         {
             // null or uninitialized variable:
             if (variable.IsNull)
@@ -240,7 +250,7 @@ namespace Pchp.Library
 
         /// <summary>
         /// Helper visitor class that counts items and items in arrays recursively.
-        /// See <see cref="count"/> and <see cref="COUNT_RECURSIVE"/> for more details.
+        /// See <see cref="count(PhpValue, int)"/> and <see cref="COUNT_RECURSIVE"/> for more details.
         /// </summary>
         sealed class RecursiveCounter : PhpVariableVisitor
         {
@@ -633,7 +643,7 @@ namespace Pchp.Library
         /// </summary>
         /// <param name="locals">The table of defined variables.</param>
         /// <param name="names">Names of the variables - each chan be either 
-        /// <see cref="string"/> or <see cref="PhpArray"/>. Names are retrived recursively from an array.</param>
+        /// <see cref="string"/> or <see cref="PhpArray"/>. Names are retrieved recursively from an array.</param>
         /// <returns>The <see cref="PhpArray"/> which keys are names of variables and values are deep copies of 
         /// their values.</returns>
         /// <remarks>
@@ -929,7 +939,7 @@ namespace Pchp.Library
 
             public override void Accept(bool obj) => _output.Append(obj ? "1" : string.Empty);
 
-            public override void Accept(long obj) => _output.Append(obj.ToString());
+            public override void Accept(long obj) => _output.Append(Core.Convert.ToString(obj));
 
             public override void Accept(double obj) => _output.Append(Core.Convert.ToString(obj));
 
@@ -1065,7 +1075,7 @@ namespace Pchp.Library
 
             public override void Accept(bool obj) => _output.Append(obj ? PhpVariable.True : PhpVariable.False);
 
-            public override void Accept(long obj) => _output.Append(obj.ToString());
+            public override void Accept(long obj) => _output.Append(Core.Convert.ToString(obj));
 
             public override void Accept(double obj) => _output.Append(Core.Convert.ToString(obj));
 
@@ -1282,7 +1292,7 @@ namespace Pchp.Library
             {
                 _output.Append(PhpVariable.TypeNameInt);
                 _output.Append("(");
-                _output.Append(obj.ToString());
+                _output.Append(Core.Convert.ToString(obj));
                 _output.Append(")");
             }
 
@@ -1357,7 +1367,7 @@ namespace Pchp.Library
 
                 OutputIndent();
 
-                _output.Append("[" + (entry.Key.IsString ? $"\"{entry.Key.String}\"" : entry.Key.Integer.ToString()) + "]");
+                _output.Append("[" + (entry.Key.IsString ? $"\"{entry.Key.String}\"" : Core.Convert.ToString(entry.Key.Integer)) + "]");
                 _output.Append("=>");
                 NewLine();
                 OutputIndent();

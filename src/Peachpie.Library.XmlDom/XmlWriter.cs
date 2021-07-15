@@ -4,7 +4,7 @@ using System.IO;
 using System.Text;
 using System.Xml;
 using Pchp.Core;
-using Pchp.Library;
+using Pchp.Core.Utilities;
 using Pchp.Library.Streams;
 
 namespace Peachpie.Library.XmlDom
@@ -917,7 +917,9 @@ namespace Peachpie.Library.XmlDom
         {
             var resource = ValidateXmlWriterResource(xmlwriter);
             if (resource == null)
-                return null;
+            {
+                return default; // FALSE
+            }
 
             return resource.Writer.outputMemory(flush);
         }

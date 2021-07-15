@@ -47,7 +47,7 @@ namespace Pchp.Core
         /// Buffered output associated with the context.
         /// </summary>
         public BufferedOutput/*!*/BufferedOutput => EnsureBufferedOutput(false);    // Initialize lazily as not buffered output by default.
-        
+
         /// <remarks>Is <c>null</c> reference until it is not used for the first time.</remarks>
         BufferedOutput _bufferedOutput;
 
@@ -158,6 +158,8 @@ namespace Pchp.Core
 
         public void Echo(PhpString value) => value.Output(this);
 
+        public virtual void Echo(byte[] value) => OutputStream.Write(value, 0, value.Length); // TODO: NETSTANDARD2.1 // ReadOnlySpan<byte>
+
         public void Echo(PhpValue value) => value.Output(this);
 
         public void Echo(PhpNumber value)
@@ -175,12 +177,15 @@ namespace Pchp.Core
 
         public void Echo(long value)
         {
-            Output.Write(value);
+            // use the invariant number format
+            // the underlying TextWriter converts numbers using Current Culture
+
+            Output.Write(Convert.ToString(value));
         }
 
         public void Echo(int value)
         {
-            Output.Write(value);
+            Output.Write(Convert.ToString(value));
         }
 
         public void Echo(bool value)

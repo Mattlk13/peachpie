@@ -139,7 +139,7 @@ namespace Pchp.CodeAnalysis.Symbols
         public const string PhpMemberVisibilityAttributeName = "PhpMemberVisibilityAttribute";
 
         public readonly CoreType
-            Context, Operators, Convert, StrictConvert, Comparison, StrictComparison, PhpException,
+            Context, Operators, Convert, StrictConvert, Comparison, StrictComparison, PhpException, PhpCallableToDelegate,
             ScriptAttribute, PhpTraitAttribute, PharAttribute, PhpTypeAttribute, PhpHiddenAttribute, PhpFieldsOnlyCtorAttribute, DefaultValueAttribute, PhpMemberVisibilityAttribute, PhpStaticLocalAttribute, PhpCustomAtribute,
             NullableAttribute, NullableContextAttribute,
             ScriptDiedException,
@@ -147,7 +147,7 @@ namespace Pchp.CodeAnalysis.Symbols
             BinderFactory, GetClassConstBinder, GetFieldBinder, SetFieldBinder, AccessMask,
             Dynamic_NameParam_T, Dynamic_TargetTypeParam, Dynamic_LateStaticTypeParam, Dynamic_CallerTypeParam, Dynamic_UnpackingParam_T,
             RuntimeChain_ChainEnd, RuntimeChain_Value_T, RuntimeChain_Property_T, RuntimeChain_ArrayItem_T, RuntimeChain_ArrayNewItem_T,
-            PhpTypeInfoExtension, PhpTypeInfo, CommonPhpArrayKeys,
+            PhpTypeInfoExtension, PhpTypeInfo, CommonPhpArrayKeys, Helpers,
             PhpNumber, PhpValue, PhpAlias, PhpString, PhpArray, PhpResource, IPhpArray, IPhpEnumerable, IPhpCallable, IPhpConvertible, PhpString_Blob,
             IntStringKey, PhpHashtable, ImportValueAttribute, DummyFieldsOnlyCtor,
             Void, Object, Byte, Int32, Long, Double, Boolean, String, Exception,
@@ -193,6 +193,7 @@ namespace Pchp.CodeAnalysis.Symbols
             Convert = Create("Convert");
             StrictConvert = Create("StrictConvert");
             PhpException = Create("PhpException");
+            PhpCallableToDelegate = Create("PhpCallableToDelegate`1"); // Arity 1
             ScriptAttribute = Create("ScriptAttribute");
             PhpTraitAttribute = Create(PhpTraitAttributeName);
             PharAttribute = Create("PharAttribute");
@@ -234,6 +235,7 @@ namespace Pchp.CodeAnalysis.Symbols
             PhpTypeInfoExtension = Create("Reflection.PhpTypeInfoExtension");
             PhpTypeInfo = Create("Reflection.PhpTypeInfo");
             CommonPhpArrayKeys = Create("CommonPhpArrayKeys");
+            Helpers = Create("Utilities.Helpers");
 
             Iterator = CreateFromFullName("Iterator");
             Traversable = CreateFromFullName("Traversable");

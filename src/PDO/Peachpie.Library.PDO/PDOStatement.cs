@@ -12,6 +12,7 @@ using static Peachpie.Library.PDO.PDO;
 using static Pchp.Library.Objects;
 using Pchp.Core.Reflection;
 using Pchp.Library.Database;
+using System.Collections;
 
 namespace Peachpie.Library.PDO
 {
@@ -20,7 +21,7 @@ namespace Peachpie.Library.PDO
     /// </summary>
     [PhpType(PhpTypeAttribute.InheritName)]
     [PhpExtension(PDOConfiguration.PdoExtensionName)]
-    public class PDOStatement : Traversable
+    public class PDOStatement : Traversable, IEnumerable<PhpValue>
     {
         private protected struct BoundParam
         {
@@ -59,7 +60,7 @@ namespace Peachpie.Library.PDO
                     switch (Type.Value & ~PARAM.PARAM_INPUT_OUTPUT)
                     {
                         case PARAM.PARAM_BOOL:
-                            p.Value = Variable.ToBoolean(); // TODO: boxed value
+                            p.Value = Utilities.DbValueHelper.AsObject(Variable.ToBoolean());
                             p.DbType = DbType.Boolean;
                             break;
 
@@ -137,7 +138,7 @@ namespace Peachpie.Library.PDO
         private protected Dictionary<IntStringKey, BoundParam> bound_columns;
 
         private protected PDO_FETCH _default_fetch_type;
-        private protected int _fetch_column = -1;
+        private protected long _fetch_column = 0; // first column by default
         private protected PhpTypeInfo _default_fetch_class;
         private protected PhpValue[] _default_fetch_class_args;
 
@@ -176,6 +177,9 @@ namespace Peachpie.Library.PDO
             _lastError = error;
             PDO.HandleError(error);
         }
+
+        // PDOException: SQLSTATE[HY000]: General error
+        private protected ErrorInfo FetchKeyPairError => ErrorInfo.Create("PDO::FETCH_KEY_PAIR fetch mode requires the result set to contain exactly 2 columns.");
 
         #endregion
 
@@ -398,14 +402,32 @@ namespace Peachpie.Library.PDO
                     case PDO_FETCH.FETCH_NAMED:
                         return this.ReadNamed();
 
+                    case PDO_FETCH.FETCH_KEY_PAIR:
+
+                        if (Result.TryReadRow(out var oa, out _))
+                        {
+                            if (oa.Length != 2)
+                            {
+                                HandleError(FetchKeyPairError);
+                            }
+                            else
+                            {
+                                return new PhpArray(1)
+                                {
+                                    // 1st col => 2nd col
+                                    { PhpValue.FromClr(oa[0]).ToIntStringKey(), PhpValue.FromClr(oa[1]) },
+                                };
+                            }
+                        }
+
+                        return PhpValue.False;
+
                     //case PDO_FETCH.FETCH_LAZY:
                     //    return new PDORow( ... ) reads columns lazily
 
                     //case PDO_FETCH.FETCH_INTO:
 
                     //case PDO_FETCH.FETCH_FUNC:
-
-                    //case PDO_FETCH.FETCH_KEY_PAIR:
 
                     default:
                         throw new NotImplementedException($"fetch {how}");
@@ -431,19 +453,6 @@ namespace Peachpie.Library.PDO
             var style = fetch_style != PDO_FETCH.Default ? fetch_style : _default_fetch_type;
             var flags = style & PDO_FETCH.Flags;
 
-            if (style == PDO_FETCH.FETCH_COLUMN)
-            {
-                if (fetch_argument.IsLong(out var l))
-                {
-                    _fetch_column = (int)l;
-                }
-                else
-                {
-                    HandleError("The fetch_argument must be an integer for FETCH_COLUMN.");
-                    return null;
-                }
-            }
-
             if ((style & PDO_FETCH.FETCH_CLASS) != 0 && !fetch_argument.IsEmpty)
             {
                 if (!setFetchMode(fetch_style, fetch_argument, ctor_args))
@@ -457,6 +466,12 @@ namespace Peachpie.Library.PDO
             switch (style)
             {
                 case PDO_FETCH.FETCH_KEY_PAIR:
+
+                    if (Result.FieldCount != 2)
+                    {
+                        HandleError(FetchKeyPairError);
+                        return null;
+                    }
 
                     while (Result.TryReadRow(out var oa, out _))
                     {
@@ -473,6 +488,20 @@ namespace Peachpie.Library.PDO
                         // 1st col => [ 2nd col, 3rd col, ... ]
                         result[PhpValue.FromClr(oa[0]).ToIntStringKey()] = AsAssocArray(oa, names, 1);
                     }
+                    break;
+
+                case PDO_FETCH.FETCH_COLUMN:
+
+                    if (!fetch_argument.IsLong(out var colno))
+                    {
+                        colno = 0;
+                    }
+
+                    while (TryFetchColumn((int)colno, out var value))
+                    {
+                        result.Add(value);
+                    }
+
                     break;
 
                 default:
@@ -553,23 +582,29 @@ namespace Peachpie.Library.PDO
         }
 
         /// <summary>
+        /// Reads next row and gets field value at given column.
+        /// </summary>
+        [PhpHidden]
+        bool TryFetchColumn(long colno, out PhpValue value)
+        {
+            if (Result.CheckFieldIndex(checked((int)colno)) && Result.TryReadRow(out object[] oa, out string[] names))
+            {
+                value = PhpValue.FromClr(oa[colno]);
+                return true;
+            }
+
+            value = default; // NULL
+            return false;
+        }
+
+        /// <summary>
         /// Returns a single column from the next row of a result set.
         /// </summary>
         /// <param name="column_number">0-indexed number of the column you wish to retrieve from the row. If no value is supplied, PDOStatement::fetchColumn() fetches the first column</param>
         /// <returns>Single column from the next row of a result set or FALSE if there are no more rows</returns>
-        public virtual PhpValue fetchColumn(int? column_number = default)
+        public virtual PhpValue fetchColumn(long column_number = 0)
         {
-            if (Result.CheckRowIndex(Result.CurrentRowIndex))
-            {
-                int idx = column_number.HasValue ? column_number.Value : Result.FetchNextField();
-                if (Result.CheckFieldIndex(idx))
-                {
-                    return PhpValue.FromClr(Result.GetFieldValue(Result.CurrentRowIndex, idx));
-                }
-            }
-
-            //
-            return PhpValue.False;
+            return TryFetchColumn(column_number, out var value) ? value : PhpValue.False;
         }
 
         /// <summary>
@@ -711,7 +746,7 @@ namespace Peachpie.Library.PDO
                     }
                     else if (args[0].IsLong(out var l))
                     {
-                        _fetch_column = (int)l;
+                        _fetch_column = l;
                         break;
                     }
                     else
@@ -991,9 +1026,10 @@ namespace Peachpie.Library.PDO
                     var current = enumerator.Current;
 
                     bound_params[current.Key] =
-                        current.Value.IsNull
-                            ? new BoundParam { Type = PARAM.PARAM_NULL }
-                            : new BoundParam { Type = PARAM.PARAM_STR, Variable = current.Value.ToString(Context), };
+                        current.Value.IsNull ? new BoundParam { Type = PARAM.PARAM_NULL }
+                        : current.Value.IsLong(out var lvalue) ? new BoundParam { Type = PARAM.PARAM_INT, Variable = lvalue }
+                        : current.Value.IsBoolean(out var bvalue) ? new BoundParam { Type = PARAM.PARAM_BOOL, Variable = bvalue }
+                        : new BoundParam { Type = PARAM.PARAM_STR, Variable = current.Value.ToString(Context), };
                 }
             }
 
@@ -1019,5 +1055,23 @@ namespace Peachpie.Library.PDO
             //
             return true;
         }
+
+        #region IEnumerable<PhpValue>
+
+        IEnumerator<PhpValue> IEnumerable<PhpValue>.GetEnumerator()
+        {
+            for (; ; )
+            {
+                var value = fetch();
+                if (value.IsFalse)
+                    yield break;
+
+                yield return value;
+            }
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => ((IEnumerable<PhpValue>)this).GetEnumerator();
+
+        #endregion
     }
 }

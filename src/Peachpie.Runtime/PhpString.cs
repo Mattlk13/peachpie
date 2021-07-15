@@ -1,4 +1,5 @@
-﻿using Pchp.Core.Text;
+﻿using Pchp.Core.Collections;
+using Pchp.Core.Text;
 using Pchp.Core.Utilities;
 using System;
 using System.Collections;
@@ -105,11 +106,11 @@ namespace Pchp.Core.Text
         /// Copies characters to a new array of <see cref="char"/>s.
         /// Single-byte chars are encoded to Unicode chars.
         /// </summary>
-        public static char[] ToCharArray(BlobChar[] chars, Encoding enc)
+        public static Span<char> ToCharArray(BlobChar[] chars, Encoding enc)
         {
             // TODO: more decent code
 
-            var result = new List<char>(chars.Length);
+            var result = new ValueList<char>(chars.Length);
 
             Debug.Assert(chars != null);
 
@@ -134,7 +135,7 @@ namespace Pchp.Core.Text
                     }
 
                     var charscount = enc.GetChars(src, 0, src.Length, tmp, 0);
-                    result.AddRange(new ArraySegment<char>(tmp, 0, charscount));
+                    result.AddRange(tmp, 0, charscount);
                 }
                 else
                 {
@@ -142,7 +143,7 @@ namespace Pchp.Core.Text
                 }
             }
 
-            return result.ToArray(); // TODO: span of underlaying items
+            return result.AsSpan();
         }
 
         /// <summary>
@@ -153,7 +154,7 @@ namespace Pchp.Core.Text
         {
             // TODO: more decent code
 
-            var result = new List<byte>(chars.Length);
+            var result = new ValueList<byte>(chars.Length);
 
             Debug.Assert(chars != null);
 
@@ -182,11 +183,11 @@ namespace Pchp.Core.Text
                     }
 
                     var bytescount = enc.GetBytes(src, 0, src.Length, tmp, 0);
-                    result.AddRange(new ArraySegment<byte>(tmp, 0, bytescount));
+                    result.AddRange(tmp, 0, bytescount);
                 }
             }
 
-            return result.ToArray(); // TODO: span of underlaying items
+            return result.ToArray(); // TODO: .AsSpan()
         }
 
         internal static BlobChar[] ToBlobCharArray(string str)
@@ -303,7 +304,7 @@ namespace Pchp.Core
         /// </summary>
         [DebuggerDisplay("{DebugString}")]
         [DebuggerNonUserCode, DebuggerStepThrough]
-        public sealed class Blob : IMutableString
+        public sealed class Blob : IMutableString, IEquatable<Blob>
         {
             #region enum Flags
 
@@ -318,8 +319,6 @@ namespace Pchp.Core
                 ContainsBinary = 1,
 
                 IsNonEmpty = 2,
-
-                IsArrayOfChunks = 4,
 
                 /// <summary>
                 /// Whether the blob contains mutable instances that have to be cloned when copying.
@@ -411,7 +410,7 @@ namespace Pchp.Core
             /// <summary>
             /// The string is represented internally as array of chunks.
             /// </summary>
-            private bool IsArrayOfChunks => (_flags & Flags.IsArrayOfChunks) != 0;
+            bool IsArrayOfChunks => _chunks != null && _chunks.GetType() == typeof(object[]);
 
             /// <summary>
             /// Gets value indicating that this instance of data is shared and cannot be written to.
@@ -425,6 +424,15 @@ namespace Pchp.Core
                 // pre-cache
                 _length = 0;
                 _string = string.Empty;
+            }
+
+            /// <param name="capacity">Number of preallocated chunks. Makes sense for values greater than <c>1</c>.</param>
+            public Blob(int capacity) : this()
+            {
+                if (capacity > 1)
+                {
+                    _chunks = new object[capacity];
+                }
             }
 
             public Blob(string x, string y)
@@ -441,7 +449,7 @@ namespace Pchp.Core
                 {
                     _chunks = new object[] { x, y };
                     _chunksCount = 2;
-                    _flags = Flags.IsArrayOfChunks | Flags.IsNonEmpty;
+                    _flags = Flags.IsNonEmpty;
                 }
             }
 
@@ -492,10 +500,8 @@ namespace Pchp.Core
                 {
                     if (chunks.GetType() == typeof(object[]))
                     {
-                        Debug.Assert(IsArrayOfChunks);
-                        var arr = (object[])chunks;
                         var newarr = new object[_chunksCount];
-                        Array.Copy(arr, newarr, _chunksCount);
+                        Array.Copy((object[])chunks, newarr, _chunksCount);
 
                         if ((_flags & Flags.ContainsMutables) != 0)
                         {
@@ -516,7 +522,6 @@ namespace Pchp.Core
 
             static void InplaceDeepCopy(ref object chunk)
             {
-                AssertChunkObject(chunk);
                 if (chunk.GetType() == typeof(string)) { }  // immutable
                 else if (chunk.GetType() == typeof(Blob)) chunk = ((Blob)chunk).AddRef();
                 else chunk = ((Array)chunk).Clone();   // byte[], char[], BlobChar[]
@@ -549,8 +554,6 @@ namespace Pchp.Core
                 {
                     if (chunks.GetType() == typeof(object[]))
                     {
-                        Debug.Assert(IsArrayOfChunks);
-
                         // TODO: cache length for current chunks version
                         return ChunkLength((object[])chunks, _chunksCount);
                     }
@@ -592,13 +595,14 @@ namespace Pchp.Core
             #region Add, Append
 
             public void Append(string value) => Add(value);
+
             public void Append(PhpString value) => Add(value);
 
             public void Add(string value)
             {
                 if (!string.IsNullOrEmpty(value))
                 {
-                    AddChunk(value);
+                    AddChunkInternal(value);
                 }
             }
 
@@ -616,14 +620,14 @@ namespace Pchp.Core
 
                 if (value.IsArrayOfChunks)
                 {
-                    AddChunk(value.AddRef());
+                    AddChunkInternal(value.AddRef());
                 }
                 else
                 {
                     // if containing only one chunk, add it directly
                     var chunk = value._chunks;
                     InplaceDeepCopy(ref chunk);
-                    AddChunk(chunk);
+                    AddChunkInternal(chunk);
                 }
 
                 _flags |= (value._flags & (Flags.ContainsBinary | Flags.ContainsMutables));    // maintain the binary data flag
@@ -633,7 +637,7 @@ namespace Pchp.Core
             {
                 if (value != null && value.Length != 0)
                 {
-                    AddChunk(value);
+                    AddChunkInternal(value);
                     _flags |= Flags.ContainsBinary | Flags.ContainsMutables;
                 }
             }
@@ -642,7 +646,7 @@ namespace Pchp.Core
             {
                 if (value != null && value.Length != 0)
                 {
-                    AddChunk(value);
+                    AddChunkInternal(value);
                     _flags |= Flags.ContainsMutables;
                 }
             }
@@ -651,7 +655,7 @@ namespace Pchp.Core
             {
                 if (value != null && value.Length != 0)
                 {
-                    AddChunk(value);
+                    AddChunkInternal(value);
                     _flags |= Flags.ContainsMutables;
                 }
             }
@@ -708,56 +712,60 @@ namespace Pchp.Core
                 Debug.Assert(chunk is byte[] || chunk is string || chunk is char[] || chunk is Blob || chunk is BlobChar[]);
             }
 
-            void AddChunk(object newchunk)
+            void AddChunkInternal(object newchunk)
             {
                 AssertChunkObject(newchunk);
 
-                var chunks = _chunks;
-                if (chunks != null)
-                {
-                    Debug.Assert(!this.IsEmpty);
-
-                    // TODO: Compact byte[] chunks together
-
-                    if (IsArrayOfChunks)
-                    {
-                        Debug.Assert(chunks.GetType() == typeof(object[]));
-                        AddChunkToArray((object[])chunks, newchunk);
-                    }
-                    else
-                    {
-                        AssertChunkObject(chunks);
-                        _chunks = new[] { chunks, newchunk, null, null }; // [4]
-                        _chunksCount = 2;
-                        _flags |= Flags.IsArrayOfChunks;
-                    }
-                }
-                else
+                if (this.IsEmpty)
                 {
                     _chunks = newchunk;
                     _flags |= Flags.IsNonEmpty;
+                }
+                else
+                {
+                    Debug.Assert(!this.IsEmpty);
+
+                    if (_chunks is object[] arr)
+                    {
+                        ref var lastchunk = ref arr[_chunksCount - 1];
+                        if (newchunk.GetType() == typeof(byte[]) && lastchunk.GetType() == typeof(byte[]))
+                        {
+                            // concat byte[] chunks together
+                            lastchunk = ArrayUtils.Concat((byte[])lastchunk, (byte[])newchunk);
+                        }
+                        else
+                        {
+                            // ensure capacity
+                            if (_chunksCount == arr.Length)
+                            {
+                                Array.Resize(ref arr, (arr.Length + 1) * 2);
+                                _chunks = arr;
+                            }
+
+                            //
+                            arr[_chunksCount++] = newchunk;
+                        }
+                    }
+                    else
+                    {
+                        AssertChunkObject(_chunks);
+
+                        if (newchunk.GetType() == typeof(byte[]) && _chunks.GetType() == typeof(byte[]))
+                        {
+                            // concat byte[] chunks together
+                            _chunks = ArrayUtils.Concat((byte[])_chunks, (byte[])newchunk);
+                        }
+                        else
+                        {
+                            _chunks = new[] { _chunks, newchunk, null, null }; // [4]
+                            _chunksCount = 2;
+                        }
+                    }
                 }
 
                 //
                 _string = null;
                 _length = -1;
-            }
-
-            void AddChunkToArray(object[] chunks, object newchunk)
-            {
-                Debug.Assert(chunks != null);
-
-                if (_chunksCount >= chunks.Length)
-                {
-                    var newarr = new object[(chunks.Length + 1) * 2];
-                    Array.Copy(chunks, newarr, chunks.Length);
-                    _chunks = chunks = newarr;
-
-                    // TODO: when chunks.Length ~ N => compact
-                }
-
-                //
-                chunks[_chunksCount++] = newchunk;
             }
 
             #endregion
@@ -786,8 +794,8 @@ namespace Pchp.Core
 
                 switch (chunk)
                 {
-                    case string str: ctx.Output.Write(str); break;
-                    case byte[] barr: ctx.OutputStream.WriteAsync(barr).GetAwaiter().GetResult(); break;
+                    case string str: ctx.Echo(str); break;
+                    case byte[] barr: ctx.Echo(barr); break;
                     case Blob b: b.Output(ctx); break;
                     case char[] carr: ctx.Output.Write(carr); break;
                     case BlobChar[] barr: WriteChunkAsync(ctx, barr).GetAwaiter().GetResult(); break;
@@ -861,12 +869,10 @@ namespace Pchp.Core
                 Debug.Assert(target != null);
 
                 var chunks = _chunks;
-                if (chunks.GetType() == typeof(object[]))
+                if (chunks is object[] arr)
                 {
-                    Debug.Assert(IsArrayOfChunks);
-
                     // TODO: cache length for current chunks version
-                    ChunkSubstring(target, start, ref count, (object[])chunks, _chunksCount);
+                    ChunkSubstring(target, start, ref count, arr, _chunksCount);
                 }
                 else
                 {
@@ -888,7 +894,7 @@ namespace Pchp.Core
                         if (start < str.Length)
                         {
                             int append = Math.Min(str.Length - start, count);
-                            target.AddChunk(str.Substring(start, append));
+                            target.AddChunkInternal(str.Substring(start, append));
                             count -= append;
                         }
 
@@ -1097,30 +1103,28 @@ namespace Pchp.Core
                 }
                 else
                 {
-                    var builder = new StringBuilder(32);    // TODO: pooled instance
+                    var builder = StringBuilderUtilities.Pool.Get();
 
                     for (int i = 0; i < count; i++)
                     {
                         builder.Append(ChunkToString(encoding, chunks[i]));
                     }
 
-                    return builder.ToString();
+                    return StringBuilderUtilities.GetStringAndReturn(builder);
                 }
             }
 
             static string ChunkToString(Encoding encoding, object chunk)
             {
-                AssertChunkObject(chunk);
-
-                switch (chunk)
+                return chunk switch
                 {
-                    case string str: return str;
-                    case byte[] barr: return encoding.GetString(barr);
-                    case Blob b: return b.ToString(encoding);
-                    case char[] carr: return new string(carr);
-                    case BlobChar[] barr: return new string(BlobChar.ToCharArray(barr, encoding));
-                    default: throw new ArgumentException(chunk.GetType().ToString());
-                }
+                    string str => str,
+                    byte[] barr => encoding.GetString(barr),
+                    Blob b => b.ToString(encoding),
+                    char[] carr => new string(carr),
+                    BlobChar[] barr => BlobChar.ToCharArray(barr, encoding).ToString(),
+                    _ => throw new ArgumentException(chunk.GetType().ToString())
+                };
             }
 
             #endregion
@@ -1156,7 +1160,7 @@ namespace Pchp.Core
                 else
                 {
 
-                    var buffer = new List<byte>();
+                    var buffer = new ValueList<byte>();
                     for (int i = 0; i < count; i++)
                     {
                         buffer.AddRange(ChunkToBytes(encoding, chunks[i]));
@@ -1230,7 +1234,7 @@ namespace Pchp.Core
                     {
                         if (index > this.Length)
                         {
-                            this.AddChunk(new string('\0', index - this.Length));
+                            this.AddChunkInternal(new string('\0', index - this.Length));
                         }
 
                         object chunk;   // byte[] | string
@@ -1244,7 +1248,7 @@ namespace Pchp.Core
                             chunk = value.ToString();
                         }
 
-                        this.AddChunk(chunk);
+                        this.AddChunkInternal(chunk);
                     }
                     else if (index >= 0)
                     {
@@ -1490,6 +1494,15 @@ namespace Pchp.Core
             IPhpArray IPhpArray.EnsureItemArray(IntStringKey key) { throw new NotSupportedException(); }
 
             #endregion
+
+            #region IEquatable
+
+            public bool Equals(Blob other)
+            {
+                return other != null && ToString() == other.ToString();
+            }
+
+            #endregion
         }
 
         /// <summary>
@@ -1509,19 +1522,24 @@ namespace Pchp.Core
         public bool ContainsBinaryData => _data is Blob b && b.ContainsBinaryData;
 
         /// <summary>
-        /// Gets value indicating the string is empty.
+        /// Gets value indicating the string is empty or uninitialized.
         /// </summary>
         public bool IsEmpty => IsDefault || (_data is string s && s.Length == 0) || (_data is Blob b && b.IsEmpty);
 
         /// <summary>
-        /// The value is not initialized.
+        /// The value is not initialized, representing <c>NULL</c>.
         /// </summary>
         public bool IsDefault => ReferenceEquals(_data, null);
 
         /// <summary>
-        /// Empty immutable string.
+        /// Empty immutable string representing the <see cref="string.Empty"/> (<c>""</c>).
         /// </summary>
         public static PhpString Empty => new PhpString(string.Empty);
+
+        /// <summary>
+        /// UNinitialized value of <see cref="PhpString"/>, representing <c>NULL</c>.
+        /// </summary>
+        public static readonly PhpString Default = default(PhpString);
 
         #region Construction, DeepCopy
 
@@ -1575,7 +1593,7 @@ namespace Pchp.Core
         /// Converts <see cref="byte"/> array to <see cref="PhpString"/>.
         /// </summary>
         /// <param name="value">String value, can be <c>null</c>.</param>
-        public static explicit operator PhpString(byte[] value) => new PhpString(value);
+        public static implicit operator PhpString(byte[] value) => new PhpString(value);
 
         /// <summary>
         /// Converts <see cref="char"/> array to <see cref="PhpString"/>.
@@ -1589,6 +1607,16 @@ namespace Pchp.Core
             //
             return new PhpString(b);
         }
+
+        /// <summary>
+        /// Gets the value as <see cref="PhpValue"/>.
+        /// </summary>
+        public static implicit operator PhpValue(PhpString value) => AsPhpValue(value);
+
+        /// <summary>
+        /// Operator.
+        /// </summary>
+        public static PhpString ToPhpString(byte[] value) => value;
 
         public PhpString DeepCopy() => new PhpString(this);
 
@@ -1787,11 +1815,6 @@ namespace Pchp.Core
                 }
             }
         }
-
-        /// <summary>
-        /// Gets the value as <see cref="PhpValue"/>.
-        /// </summary>
-        public static implicit operator PhpValue(PhpString value) => AsPhpValue(value);
 
         /// <summary>
         /// Gets bytes count when converted to bytes using provided <paramref name="encoding"/>.

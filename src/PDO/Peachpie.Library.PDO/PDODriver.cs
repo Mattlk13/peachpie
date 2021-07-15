@@ -1,16 +1,13 @@
 ﻿#nullable enable
 
-using Pchp.Core;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
-using System.Linq;
 using System.Threading.Tasks;
-using System.Collections.Specialized;
-using System.Reflection;
-using Peachpie.Library.PDO.Utilities;
 using System.Text;
-using Pchp.Library;
+using Peachpie.Library.PDO.Utilities;
+using Pchp.Core;
+using Pchp.Core.Utilities;
 
 namespace Peachpie.Library.PDO
 {
@@ -87,7 +84,7 @@ namespace Peachpie.Library.PDO
         /// </summary>
         /// <param name="pdo">Containing <see cref="PDO"/> object reference.</param>
         /// <param name="stringify">Whether to stringify fetched values.</param>
-        /// <returns>Value indicating the attribute was set succesfuly.</returns>
+        /// <returns>Value indicating the attribute was set successfully.</returns>
         public virtual bool TrySetStringifyFetches(PDO pdo, bool stringify)
         {
             // NOTE: this method should be removed and stringify handled when actually used in PdoResultResource.GetValues()

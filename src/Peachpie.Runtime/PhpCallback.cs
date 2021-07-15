@@ -6,7 +6,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace Pchp.Core
 {
@@ -551,5 +550,28 @@ namespace Pchp.Core
         /// </summary>
         public static PhpCallable BindMagicCall(this PhpInvokable invokable, object target, string name)
             => (ctx, arguments) => invokable(ctx, target, new[] { (PhpValue)name, (PhpValue)PhpArray.New(arguments) });
+    }
+
+    /// <summary>
+    /// Helper class providing conversion from <see cref="IPhpCallable"/> to a custom <see cref="System.Delegate"/>.
+    /// </summary>
+    /// <typeparam name="TFunc"></typeparam>
+    public static class PhpCallableToDelegate<TFunc> where TFunc : Delegate
+    {
+        public static TFunc Get(IPhpCallable callable, Context ctx)
+        {
+            if (callable == null)
+            {
+                throw new ArgumentNullException(nameof(callable));
+            }
+
+            //
+            if (typeof(TFunc) == typeof(Action)) return (TFunc)(object)new Action(() => callable.Invoke(ctx));
+            if (typeof(TFunc) == typeof(Func<bool>)) return (TFunc)(object)new Func<bool>(() => (bool)callable.Invoke(ctx));
+            if (typeof(TFunc) == typeof(Func<long, long>)) return (TFunc)(object)new Func<long, long>((p1) => (long)callable.Invoke(ctx, p1));
+
+            //
+            return Dynamic.BinderHelpers.CreateDelegate<TFunc>(callable, ctx);
+        }        
     }
 }

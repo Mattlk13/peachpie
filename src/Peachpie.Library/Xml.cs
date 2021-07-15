@@ -112,11 +112,10 @@ namespace Pchp.Library
             /// <summary>
             /// Bound <see cref="Context"/>. Cannot be <c>null</c>.
             /// </summary>
-            public Context Context => _ctx;
             readonly Context _ctx;
 
             private Encoding _outputEncoding;
-            private bool _processNamespaces;
+            private readonly bool _processNamespaces;
             private string _namespaceSeparator;
             private Queue<string> _inputQueue;
 
@@ -276,7 +275,13 @@ namespace Pchp.Library
             private bool ParseInternal(string xml, PhpArray values, PhpArray indices)
             {
                 var stringReader = new StringReader(xml);
-                var reader = XmlReader.Create(stringReader);
+
+                // EXCEPTION: 'System.Xml.XmlException' in System.Private.Xml.dll:
+                // 'For security reasons DTD is prohibited in this XML document. To enable DTD processing set the DtdProcessing property on XmlReaderSettings to Parse and pass the settings into XmlReader.Create method.'
+                var reader = XmlReader.Create(stringReader, settings: new XmlReaderSettings
+                {
+                    DtdProcessing = DtdProcessing.Parse,
+                });
                 Stack<ElementRecord> elementStack = new Stack<ElementRecord>();
                 TextRecord textChunk = null;
 

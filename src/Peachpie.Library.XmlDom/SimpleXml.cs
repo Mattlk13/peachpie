@@ -9,7 +9,9 @@ using System.Text;
 using System.Xml;
 using System.Xml.XPath;
 using Pchp.Core;
+using Pchp.Core.Collections;
 using Pchp.Core.Reflection;
+using Pchp.Core.Utilities;
 using Pchp.Library;
 using Pchp.Library.Streams;
 
@@ -754,7 +756,7 @@ namespace Peachpie.Library.XmlDom
             if (XmlAttribute != null) return XmlAttribute.Value;
 
             // concatenate text nodes that are immediate children of this element
-            StringBuilder sb = new StringBuilder();
+            var sb = StringBuilderUtilities.Pool.Get();
 
             foreach (XmlNode child in XmlElement.ChildNodes)
             {
@@ -762,7 +764,7 @@ namespace Peachpie.Library.XmlDom
                 if (text != null) sb.Append(text);
             }
 
-            return sb.ToString();
+            return StringBuilderUtilities.GetStringAndReturn(sb);
         }
 
         /// <summary>
@@ -886,7 +888,7 @@ namespace Peachpie.Library.XmlDom
                                 // the first element of this name
                                 properties[child.LocalName] = child_value;
                             }
-                            
+
                         }
                     }
 
@@ -1054,7 +1056,7 @@ namespace Peachpie.Library.XmlDom
         /// </summary>
         public virtual bool __unset(string name)
         {
-            List<XmlNode> to_remove = new List<XmlNode>();
+            var to_remove = new ValueList<XmlNode>();
 
             // remove all child elements of the given local name & namespace URI
             foreach (XmlNode node in XmlElement.ChildNodes)
@@ -1067,13 +1069,17 @@ namespace Peachpie.Library.XmlDom
                 }
             }
 
-            if (to_remove.Count == 0) return false;
+            if (to_remove.Count == 0)
+            {
+                return false;
+            }
             else
             {
-                foreach (XmlNode node in to_remove)
+                foreach (var node in to_remove)
                 {
                     XmlElement.RemoveChild(node);
                 }
+
                 return true;
             }
         }
@@ -1083,7 +1089,8 @@ namespace Peachpie.Library.XmlDom
         /// </summary>
         public virtual bool __isset(string name)
         {
-            XmlElement child = iterationNamespace.GetFirstChildIn(XmlElement, name);// XmlElement[name, namespaceUri];
+            var child = iterationNamespace.GetFirstChildIn(XmlElement, name);// XmlElement[name, namespaceUri];
+
             return child != null;
 
             //if (child != null) return Create(className, child);
@@ -1889,7 +1896,7 @@ namespace Peachpie.Library.XmlDom
         #region SPL.Countable
 
         /// <summary>
-        /// Count childs in the element.
+        /// Count children in the element.
         /// </summary>
         /// <returns></returns>
         public virtual long count() => this.Count();
@@ -2005,19 +2012,19 @@ namespace Peachpie.Library.XmlDom
         }
 
         /// <summary>
-        /// Gets <see cref="SimpleXMLIterator"/> or devided class.
+        /// Gets <see cref="SimpleXMLIterator"/> or a derided class.
         /// </summary>
         /// <param name="element">XmlElement of the class.</param>
-        /// <returns><see cref="SimpleXMLIterator"/> or devided class.</returns>
+        /// <returns><see cref="SimpleXMLIterator"/> or a derided class.</returns>
         protected SimpleXMLIterator GetIterator(XmlElement element)
         {
-            if (this is SimpleXMLIterator)
+            if (this.GetType() == typeof(SimpleXMLIterator))
             {
                 return new SimpleXMLIterator(_ctx, element);
             }
             else
             {
-                SimpleXMLIterator res = (SimpleXMLIterator)(this.GetPhpTypeInfo().CreateUninitializedInstance(_ctx));
+                var res = (SimpleXMLIterator)(this.GetPhpTypeInfo().CreateUninitializedInstance(_ctx));
                 res.XmlElement = element;
                 return res;
             }

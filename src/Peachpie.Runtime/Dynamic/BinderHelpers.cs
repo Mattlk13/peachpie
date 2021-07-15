@@ -224,7 +224,7 @@ namespace Pchp.Core.Dynamic
             {
                 // PhpAlias is provided but typed as System.Object
                 // create restriction and retry with properly typed {expr:PhpAlias}
-                restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(expr, typeof(PhpAlias)));
+                restrictions = restrictions.Merge(BindingRestrictions.GetExpressionRestriction(Expression.TypeIs(expr, typeof(PhpAlias)))); // PhpAlias is abstract -> restriction using TypeIs
                 expr = Expression.Convert(expr, typeof(PhpAlias));
 
                 return TryTargetAsObject(
@@ -260,8 +260,17 @@ namespace Pchp.Core.Dynamic
                 return false;
             }
 
-            //
+            // StructBox`1
+            if (value is IStructBox box)
+            {
+                var structboxtype = value.GetType();
+                // ((StructBox<TValue>)expr).Value : TValue
+                restrictions = restrictions.Merge(BindingRestrictions.GetTypeRestriction(expr, structboxtype));
+                value = box.BoxedValue;
+                expr = Expression.Field(Expression.Convert(expr, structboxtype), /*nameof(StructBox<>.Value)*/"Value");
+            }
 
+            //
             var lt = target.Expression.Type;
             if (!lt.IsValueType && !lt.IsSealed && !typeof(PhpArray).IsAssignableFrom(lt) && !typeof(PhpResource).IsAssignableFrom(lt))
             {
@@ -1107,6 +1116,11 @@ namespace Pchp.Core.Dynamic
                                 // TODO: if we create IPhpCallback in compile-time, we know the routine needs the locals, ...
                                 break;
 
+                            case ImportValueAttribute.ValueSpec.LocalVariable:
+                                boundargs[i] = Expression.Default(p.ParameterType); // null
+                                PhpException.Throw(PhpError.Notice, "Cannot reference local variable $" + p.Name + " in call to " + method.Name);
+                                break;
+
                             case ImportValueAttribute.ValueSpec.This:
                                 // $this is unknown, get NULL
                                 boundargs[i] = Expression.Default(p.ParameterType);
@@ -1120,6 +1134,9 @@ namespace Pchp.Core.Dynamic
 
                             case ImportValueAttribute.ValueSpec.CallerStaticClass:
                                 throw new NotSupportedException("ImportCallerStaticClassAttribute dynamically."); // we don't know current late static bound type
+
+                            default:
+                                throw new NotSupportedException(value.ToString());
                         }
 
                         continue;
@@ -1372,6 +1389,40 @@ namespace Pchp.Core.Dynamic
 
             // compile & create delegate
             var lambda = Expression.Lambda<PhpCallable>(invocation, targets[0].Name + "#" + targets.Length, true, ps);
+            return lambda.Compile();
+        }
+
+        public static TFunc CreateDelegate<TFunc>(IPhpCallable callable, Context ctx) where TFunc: Delegate
+        {
+            // signature of the delegate
+            var delegate_invoke = typeof(TFunc).GetMethod("Invoke", BindingFlags.Public | BindingFlags.Instance);
+
+            //
+            var ips = delegate_invoke.GetParameters(); // invocation parameters
+            var ps = new ParameterExpression[ips.Length]; // lambda parameters (will be the same)
+            for (int i = 0; i < ps.Length; i++)
+            {
+                ps[i] = Expression.Parameter(ips[i].ParameterType, ips[i].Name);
+            }
+
+            //
+
+            var invoke = typeof(IPhpCallable).GetMethod("Invoke", BindingFlags.Public | BindingFlags.Instance);
+
+            var ctxexpr = Expression.Constant(ctx);
+            var arguments = ps.Select(p => ConvertExpression.Bind(p, typeof(PhpValue), ctxexpr));
+
+            // Template: callable.Invoke(ctx, args)
+            Expression invocation = Expression.Call(
+                instance: Expression.Constant(callable),
+                method: invoke,
+                arguments: new Expression[] { ctxexpr, Expression.NewArrayInit(typeof(PhpValue), arguments) });
+
+            // return type
+            invocation = ConvertExpression.Bind(invocation, delegate_invoke.ReturnType, ctxexpr);
+
+            // compile & create delegate
+            var lambda = Expression.Lambda<TFunc>(invocation, true, ps);
             return lambda.Compile();
         }
 
