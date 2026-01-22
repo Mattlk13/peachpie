@@ -201,7 +201,7 @@ namespace Pchp.CodeAnalysis.Semantics
 
         protected BoundExpression BindExpression(AST.Expression expr) => BindExpression(expr, BoundAccess.Read);
 
-        protected BoundArgument BindArgument(AST.Expression expr, bool isByRef = false, bool isUnpack = false, string name = null)
+        protected BoundArgument BindArgument(AST.IExpression expr, bool isByRef = false, bool isUnpack = false, string name = null)
         {
             //if (isUnpack)
             //{
@@ -215,6 +215,21 @@ namespace Pchp.CodeAnalysis.Semantics
             return isUnpack
                 ? BoundArgument.CreateUnpacking(bound, name)
                 : BoundArgument.Create(bound, name);
+        }
+
+        protected ImmutableArray<BoundArgument> BindArguments(AST.EchoStmt.ParametersEnumerable expressions)
+        {
+            var arguments = new BoundArgument[expressions.Count/*mostly 1*/];
+            var i = 0;
+            foreach (var expr in expressions)
+            {
+                arguments[i++] = BindArgument(expr);
+            }
+
+            Debug.Assert(i == arguments.Length);
+
+            //
+            return ImmutableArray.Create(arguments);
         }
 
         protected ImmutableArray<BoundArgument> BindArguments(params AST.Expression[] expressions)
@@ -968,7 +983,7 @@ namespace Pchp.CodeAnalysis.Semantics
                         // value === condition[i]
                         var cond = AST.BinaryEx.Create(
                             arm.ConditionList[i].Span,
-                            AST.Operations.Identical,
+                            Tokens.T_IS_IDENTICAL, // AST.Operations.Identical,
                             (AST.Expression)value,
                             (AST.Expression)arm.ConditionList[i])
                         ;
@@ -980,7 +995,7 @@ namespace Pchp.CodeAnalysis.Semantics
                         }
                         else
                         {
-                            condition = AST.BinaryEx.Create(Span.Invalid, AST.Operations.Or, condition, cond);
+                            condition = AST.BinaryEx.Create(Span.Invalid, Tokens.T_BOOLEAN_OR /*AST.Operations.Or*/, condition, cond);
                             condition.ContainingElement = arm;
                         }
                     }

@@ -17,6 +17,7 @@ using Devsense.PHP.Ast.DocBlock;
 using Pchp.CodeAnalysis.FlowAnalysis;
 using Pchp.CodeAnalysis.Semantics.Graph;
 using Peachpie.CodeAnalysis.Syntax;
+using static Peachpie.CodeAnalysis.Syntax.PhpTokenProvider;
 
 namespace Pchp.CodeAnalysis
 {
@@ -68,33 +69,14 @@ namespace Pchp.CodeAnalysis
         }
 
         /// <summary>
-        /// Creates new struct with updated <see cref="CompleteToken.TokenText"/>.
-        /// </summary>
-        public static CompleteToken WithTokenText(this CompleteToken t, string text)
-        {
-            return new CompleteToken(t.Token, t.TokenValue, t.TokenPosition, text);
-        }
-
-        /// <summary>
-        /// Creates new struct with updated <see cref="CompleteToken.TokenText"/>.
-        /// </summary>
-        public static CompleteToken WithToken(this CompleteToken t, Tokens token)
-        {
-            return new CompleteToken(token, t.TokenValue, t.TokenPosition, t.TokenText);
-        }
-
-        /// <summary>
         /// Gets value indicating the token is an ignored token - whitespace or comment.
         /// </summary>
-        public static bool IsWhitespace(this CompleteToken t) => t.Token == Tokens.T_WHITESPACE || t.Token == Tokens.T_COMMENT; // not T_DOC_COMMENT
+        internal static bool IsWhitespace(this TokenSnapshot t) => t.Token == Tokens.T_WHITESPACE || t.Token == Tokens.T_COMMENT; // not T_DOC_COMMENT
 
         /// <summary>
         /// Determines whether method has <c>$this</c> variable.
         /// </summary>
-        public static bool HasThisVariable(MethodDecl method)
-        {
-            return method != null && (method.Modifiers & PhpMemberAttributes.Static) == 0;
-        }
+        public static bool HasThisVariable(MethodDecl method) => method != null && (method.Modifiers & PhpMemberAttributes.Static) == 0;
 
         public static Span BodySpanOrInvalid(this AstNode routine)
         {

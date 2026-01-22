@@ -118,7 +118,7 @@ namespace Peachpie.Library.Scripting
             }
 
             var lines = LineBreaks.Create(code);
-            using (var tokenizer = new Lexer(new StringReader(code), Encoding.UTF8))
+            using (var tokenizer = new Lexer(code.AsMemory(), Encoding.UTF8))
             {
                 Tokens t;
                 while ((t = tokenizer.GetNextToken()) != Tokens.EOF)
@@ -616,7 +616,7 @@ namespace Peachpie.Library.Scripting
 
             Tokens t;
             var lines = LineBreaks.Create(source);
-            using (var tokenizer = new Lexer(new StringReader(source), Encoding.UTF8))
+            using (var tokenizer = new Lexer(source.AsMemory(), Encoding.UTF8))
             {
                 while ((t = tokenizer.GetNextToken()) != Tokens.EOF)
                 {
