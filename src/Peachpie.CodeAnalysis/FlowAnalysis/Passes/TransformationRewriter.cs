@@ -433,52 +433,55 @@ namespace Pchp.CodeAnalysis.FlowAnalysis.Passes
 
         public override object VisitBinaryExpression(BoundBinaryEx x)
         {
-            if (x.Operation == Ast.Operations.And ||
-                x.Operation == Ast.Operations.Or)
+            switch (x.Operation)
             {
                 // AND, OR:
-                if (x.Left.ConstantValue.TryConvertToBool(out var bleft))
-                {
-                    if (x.Operation == Ast.Operations.And)
+                case Ast.Operations.And:
+                case Ast.Operations.Or:
+                    if (x.Left.ConstantValue.TryConvertToBool(out var bleft))
                     {
-                        TransformationCount++;
-                        // TRUE && Right => Right
-                        // FALSE && Right => FALSE
-                        return bleft ? x.Right : x.Left;
+                        if (x.Operation == Ast.Operations.And)
+                        {
+                            TransformationCount++;
+                            // TRUE && Right => Right
+                            // FALSE && Right => FALSE
+                            return bleft ? x.Right : x.Left;
+                        }
+                        else if (x.Operation == Ast.Operations.Or)
+                        {
+                            TransformationCount++;
+                            // TRUE || Right => TRUE
+                            // FALSE || Right => Right
+                            return bleft ? x.Left : x.Right;
+                        }
                     }
-                    else if (x.Operation == Ast.Operations.Or)
-                    {
-                        TransformationCount++;
-                        // TRUE || Right => TRUE
-                        // FALSE || Right => Right
-                        return bleft ? x.Left : x.Right;
-                    }
-                }
 
-                if (x.Right.ConstantValue.TryConvertToBool(out var bright))
-                {
-                    if (x.Operation == Ast.Operations.And && bright == true)
+                    if (x.Right.ConstantValue.TryConvertToBool(out var bright))
                     {
-                        TransformationCount++;
-                        return x.Left; // Left && TRUE => Left
+                        if (x.Operation == Ast.Operations.And && bright == true)
+                        {
+                            TransformationCount++;
+                            return x.Left; // Left && TRUE => Left
+                        }
+                        else if (x.Operation == Ast.Operations.Or && bright == false)
+                        {
+                            TransformationCount++;
+                            // Left || FALSE => Left
+                            return x.Left;
+                        }
                     }
-                    else if (x.Operation == Ast.Operations.Or && bright == false)
+                    break;
+
+                // *
+                case Ast.Operations.Mul:
+                    if ((x.Left.ConstantValue.TryConvertToLong(out long leftCons) && leftCons == -1)
+                        || (x.Right.ConstantValue.TryConvertToLong(out long rightCons) && rightCons == -1))
                     {
+                        // X * -1, -1 * X -> -X
                         TransformationCount++;
-                        // Left || FALSE => Left
-                        return x.Left;
+                        return new BoundUnaryEx(leftCons == -1 ? x.Right : x.Left, Ast.Operations.Minus).WithAccess(x.Access);
                     }
-                }
-            }
-            else if (x.Operation == Ast.Operations.Mul)
-            {
-                if ((x.Left.ConstantValue.TryConvertToLong(out long leftCons) && leftCons == -1)
-                    || (x.Right.ConstantValue.TryConvertToLong(out long rightCons) && rightCons == -1))
-                {
-                    // X * -1, -1 * X -> -X
-                    TransformationCount++;
-                    return new BoundUnaryEx(leftCons == -1 ? x.Right : x.Left, Ast.Operations.Minus).WithAccess(x.Access);
-                }
+                    break;
             }
 
             //
@@ -639,7 +642,7 @@ namespace Pchp.CodeAnalysis.FlowAnalysis.Passes
             int i;
 
             // flattern nested concats:
-            for (i = 0; i < newargs.Length; )
+            for (i = 0; i < newargs.Length;)
             {
                 // flattern concat:
                 if (newargs[i].Value is BoundConcatEx concat)
