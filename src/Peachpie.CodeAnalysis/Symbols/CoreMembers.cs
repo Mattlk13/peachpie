@@ -353,6 +353,7 @@ namespace Pchp.CodeAnalysis.Symbols
                 ToClass_IPhpArray = ct.Convert.Method("ToClass", ct.IPhpArray);
                 AsCallable_PhpValue_RuntimeTypeHandle_Object = ct.Convert.Method("AsCallable", ct.PhpValue, ct.RuntimeTypeHandle, ct.Object);
                 AsCallable_String_RuntimeTypeHandle_Object = ct.Convert.Method("AsCallable", ct.String, ct.RuntimeTypeHandle, ct.Object);
+                AsCallable_Object_RoutineInfo = ct.Operators.Method("AsCallable", ct.Object, ct.RoutineInfo);
                 GetArrayAccess_PhpValueRef = ct.Operators.Method("GetArrayAccess", ct.PhpValue);
                 IsInstanceOf_Object_PhpTypeInfo = ct.Convert.Method("IsInstanceOf", ct.Object, ct.PhpTypeInfo);
                 ToIntStringKey_PhpValue = ct.Convert.Method("ToIntStringKey", ct.PhpValue);
@@ -393,8 +394,6 @@ namespace Pchp.CodeAnalysis.Symbols
                 Scope_Closure = ct.Operators.Method("Scope", ct.Closure);
                 Static_Closure = ct.Operators.Method("Static", ct.Closure);
                 Context_Closure = ct.Operators.Method("Context", ct.Closure);
-
-                BindTargetToMethod_Object_RoutineInfo = ct.Operators.Method("BindTargetToMethod", ct.Object, ct.RoutineInfo);
 
                 BuildGenerator_Context_PhpArray_PhpArray_GeneratorStateMachineDelegate_RuntimeMethodHandle = ct.Operators.Method("BuildGenerator", ct.Context, ct.PhpArray, ct.PhpArray, ct.GeneratorStateMachineDelegate, ct.RuntimeMethodHandle);
                 SetGeneratorDynamicScope_Generator_RuntimeTypeHandle = ct.Operators.Method("SetGeneratorDynamicScope", ct.Generator, ct.RuntimeTypeHandle);
@@ -504,7 +503,7 @@ namespace Pchp.CodeAnalysis.Symbols
                 BuildClosure_Context_IPhpCallable_Object_RuntimeTypeHandle_PhpTypeInfo_PhpArray_PhpArray,
                 This_Closure, Scope_Closure, Static_Closure, Context_Closure,
 
-                BindTargetToMethod_Object_RoutineInfo,
+                AsCallable_Object_RoutineInfo,
 
                 // Generator
                 BuildGenerator_Context_PhpArray_PhpArray_GeneratorStateMachineDelegate_RuntimeMethodHandle,

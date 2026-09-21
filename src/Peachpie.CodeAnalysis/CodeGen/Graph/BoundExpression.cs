@@ -13,7 +13,6 @@ using System.Diagnostics;
 using System.Linq;
 using System.Reflection.Metadata;
 using System.Text;
-using System.Threading.Tasks;
 using Devsense.PHP.Text;
 
 namespace Pchp.CodeAnalysis.Semantics
@@ -2371,7 +2370,20 @@ namespace Pchp.CodeAnalysis.Semantics
         {
             var target = cg.CoreTypes.IPhpCallable;
 
-            if (Receiver != null)
+            // Context
+            cg.EmitLoadContext();
+
+            // IPhpCallable
+            if (TargetCallable is MethodSymbol m && m.IsValidMethod())
+            {
+                cg.EmitConvert(Receiver, cg.CoreTypes.Object);
+                m.EmitLoadRoutineInfo(cg);
+
+                // Operators.AsCallable((object)Receiver, methodRoutineInfo)
+                cg.EmitCall(ILOpCode.Call, cg.CoreMethods.Operators.AsCallable_Object_RoutineInfo)
+                    .Expect(target);
+            }
+            else if (Receiver != null)
             {
                 // Receiver -> Name(...)
                 throw new NotImplementedException();
@@ -2397,9 +2409,34 @@ namespace Pchp.CodeAnalysis.Semantics
                 // -> IPhpCallable
                 cg.EmitConvert(cg.CoreTypes.String, FlowAnalysis.TypeRefMask.AnyType, target);
             }
-            
-            //
-            return target;
+
+            // $this
+            cg.Builder.EmitNullConstant();
+
+            // scope : RuntimeTypeHandle
+            cg.EmitCallerTypeHandle();
+
+            // statictype : PhpTypeInfo
+            if (StaticReceiver != null)
+            {
+                StaticReceiver.EmitLoadTypeInfo(cg, true);
+            }
+            else
+            {
+                cg.Builder.EmitNullConstant();
+            }
+
+            // parameter
+            cg.Emit_PhpArray_Empty();
+
+            // static
+            cg.Emit_PhpArray_Empty();
+
+            // BuildClosure( Context, IPhpCallable, null, default, PhpTypeInfo, [], []) : Closure
+            return cg.EmitCall(
+                ILOpCode.Call,
+                cg.CoreMethods.Operators.BuildClosure_Context_IPhpCallable_Object_RuntimeTypeHandle_PhpTypeInfo_PhpArray_PhpArray
+            );
         }
     }
 
@@ -2412,20 +2449,11 @@ namespace Pchp.CodeAnalysis.Semantics
             if ((m != null && m.IsValidMethod()) ||
                 (m is AmbiguousMethodSymbol a && a.IsOverloadable && a.Ambiguities.Length != 0))
             {
-                if (m.IsStatic)
-                {
-                    return m.EmitLoadRoutineInfo(cg);
-                }
-                else
-                {
-                    Debug.Assert(Receiver != null);
-
-                    // PhpCallback.Create((object)Receiver, methodRoutineInfo)
-                    cg.EmitConvert(Receiver, cg.CoreTypes.Object);
-                    m.EmitLoadRoutineInfo(cg);
-                    return cg.EmitCall(ILOpCode.Call, cg.CoreMethods.Operators.BindTargetToMethod_Object_RoutineInfo)
-                        .Expect(cg.CoreTypes.IPhpCallable);
-                }
+                // Operators.AsCallable((object)Receiver, methodRoutineInfo) : IPhpCallable
+                cg.EmitConvert(Receiver, cg.CoreTypes.Object);
+                m.EmitLoadRoutineInfo(cg);
+                return cg.EmitCall(ILOpCode.Call, cg.CoreMethods.Operators.AsCallable_Object_RoutineInfo)
+                    .Expect(cg.CoreTypes.IPhpCallable);
             }
 
             // generic conversion to IPhpCallable:
