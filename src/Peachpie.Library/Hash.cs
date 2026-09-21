@@ -1,20 +1,23 @@
-﻿using Pchp.Core;
-using System;
+﻿using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Tasks;
-using Pchp.Library.Streams;
-using Isopoh.Cryptography.Argon2;
-using BCrypt.Net;
-using Isopoh.Cryptography.SecureArray;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
+using BCrypt.Net;
+using Isopoh.Cryptography.Argon2;
+using Isopoh.Cryptography.Blake2b;
+using Isopoh.Cryptography.SecureArray;
+using Pchp.Core;
+using Pchp.Library.Standard;
+using Pchp.Library.Streams;
 using static Pchp.Library.PhpHash;
-using System.Globalization;
-using System.Buffers;
+using static Pchp.Library.PhpHash.HashPhpResource;
 
 namespace Pchp.Library
 {
@@ -3419,7 +3422,38 @@ namespace Pchp.Library
 
         #endregion
 
-        #region hash_hmac, hash_hmac_file
+        #region hash_hmac_algos, hash_hmac, hash_hmac_file
+
+        /// <summary>
+        /// Return a list of registered hashing algorithms suitable for <see cref="hash_hmac(string, byte[], byte[], bool)"/>.
+        /// </summary>
+        /// <returns>Zero-based indexed array of names of hashing algorithms.</returns>
+        public static PhpArray hash_hmac_algos()
+        {
+            // Algorithms that are suitable for HMAC are the typical cryptographic hash functions
+
+            var result = new PhpArray(HashPhpResource.HashAlgorithms.Count);
+
+            foreach (var algo in HashPhpResource.HashAlgorithms.Keys)
+            {
+                if (algo.StartsWith("sha", StringComparison.OrdinalIgnoreCase) ||
+                    algo.StartsWith("md", StringComparison.OrdinalIgnoreCase) ||
+                    algo.StartsWith("ripemd", StringComparison.OrdinalIgnoreCase) ||
+                    algo.StartsWith("blake2", StringComparison.OrdinalIgnoreCase) ||
+                    algo.StartsWith("tiger", StringComparison.OrdinalIgnoreCase) ||
+                    algo.StartsWith("haval", StringComparison.OrdinalIgnoreCase) ||
+                    algo.StartsWith("gost", StringComparison.OrdinalIgnoreCase) ||
+                    algo.StartsWith("snefru", StringComparison.OrdinalIgnoreCase) ||
+                    algo.StartsWith("whirlpool", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.Add(algo);
+                }
+            }
+
+            //var result = new PhpArray(HashPhpResource.HashAlgorithms.Keys);
+
+            return result;
+        }
 
         [return: CastToFalse]
         public static PhpString hash_hmac(string algo, byte[] data, byte[] key, bool raw_output = false)
