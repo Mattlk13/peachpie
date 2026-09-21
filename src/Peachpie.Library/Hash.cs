@@ -17,7 +17,6 @@ using Pchp.Core;
 using Pchp.Library.Standard;
 using Pchp.Library.Streams;
 using static Pchp.Library.PhpHash;
-using static Pchp.Library.PhpHash.HashPhpResource;
 
 namespace Pchp.Library
 {
