@@ -2450,7 +2450,14 @@ namespace Pchp.CodeAnalysis.Semantics
                 (m is AmbiguousMethodSymbol a && a.IsOverloadable && a.Ambiguities.Length != 0))
             {
                 // Operators.AsCallable((object)Receiver, methodRoutineInfo) : IPhpCallable
-                cg.EmitConvert(Receiver, cg.CoreTypes.Object);
+                if (Receiver == null)
+                {
+                    cg.Builder.EmitNullConstant();
+                }
+                else
+                {
+                    cg.EmitConvert(Receiver, cg.CoreTypes.Object);
+                }
                 m.EmitLoadRoutineInfo(cg);
                 return cg.EmitCall(ILOpCode.Call, cg.CoreMethods.Operators.AsCallable_Object_RoutineInfo)
                     .Expect(cg.CoreTypes.IPhpCallable);
