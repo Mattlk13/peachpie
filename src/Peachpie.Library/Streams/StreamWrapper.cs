@@ -1097,8 +1097,19 @@ namespace Pchp.Library.Streams
         {
             try
             {
-                File.Move(fromPath, toPath);
-                return true;
+                if (System.IO.File.Exists(fromPath))
+                {
+                    System.IO.File.Move(fromPath, toPath);
+                }
+                else if (System.IO.Directory.Exists(fromPath))
+                {
+                    System.IO.Directory.Move(fromPath, toPath);
+                }
+                else
+                {
+                    PhpException.Throw(PhpError.Warning, ErrResources.file_not_exists, FileSystemUtils.StripPassword(fromPath));
+                    return false;
+                }
             }
             catch (UnauthorizedAccessException)
             {
